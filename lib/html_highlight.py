@@ -1,41 +1,45 @@
-import re
 import html
-from ..emmet.html_matcher import scan, get_attributes, ElementType
+import re
 
-re_tag_end = re.compile(r'\s*\/?>$')
+from ..emmet.html_matcher import ElementType, get_attributes, scan
+
+re_tag_end = re.compile(r"\s*\/?>$")
+
 
 def highlight(code: str) -> str:
     chunks = []
     offset = [0]
 
-    def cb(name: str, elem_type: int, start: int, end: int):
+    def cb(name: str, elem_type: int, start: int, end: int) -> None:
         if offset[0] != start:
-            chunks.append(escape(code[offset[0]:start]))
+            chunks.append(escape(code[offset[0] : start]))
         offset[0] = end
 
         if elem_type == ElementType.Close:
-            chunks.append('<span class="tag close">&lt;/<span class="tag-name">%s</span>&gt;</span>' % name)
+            chunks.append(
+                f'<span class="tag close">&lt;/<span class="tag-name">{name}</span>&gt;</span>'
+            )
         else:
-            chunks.append('<span class="tag open">&lt;<span class="tag-name">%s</span>' % name)
+            chunks.append(f'<span class="tag open">&lt;<span class="tag-name">{name}</span>')
             for attr in get_attributes(code, start, end, name):
                 chunks.append(' <span class="attr">')
-                chunks.append('<span class="attr-name">%s</span>' % attr.name)
+                chunks.append(f'<span class="attr-name">{attr.name}</span>')
                 if attr.value is not None:
-                    chunks.append('=<span class="attr-value">%s</span>' % attr.value)
-                chunks.append('</span>')
+                    chunks.append(f'=<span class="attr-value">{attr.value}</span>')
+                chunks.append("</span>")
 
             tag_end = re_tag_end.search(code[start:end])
             if tag_end:
                 chunks.append(escape(tag_end.group(0)))
-            chunks.append('</span>')
+            chunks.append("</span>")
 
     scan(code, cb)
-    chunks.append(escape(code[offset[0]:]))
+    chunks.append(escape(code[offset[0] :]))
 
-    return ''.join(chunks)
+    return "".join(chunks)
 
 
-def styles():
+def styles() -> str:
     return """
     .dark .tag { color: #77c7b4; }
     .dark .attr-name { color: #8fd260; }
@@ -47,5 +51,5 @@ def styles():
     """
 
 
-def escape(code: str):
+def escape(code: str) -> str:
     return html.escape(code, False)

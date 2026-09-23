@@ -1,0 +1,37 @@
+# Dev tooling only (ruff + pyright). Sublime Text does not read this file.
+# Run: uvx ruff@0.16.8 check . && uvx ruff@0.16.8 format --check .
+#      uvx --with sublime-text-stubs==1.4200.0b2 pyright@1.1.414
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+# emmet/ is the vendored py-emmet core (tools/vendor_emmet.sh). It is updated only by
+# re-vendoring from PyPI, never edited or reformatted by hand.
+extend-exclude = ["emmet"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W", "F",  # pycodestyle, pyflakes
+  "I",            # isort
+  "UP",           # pyupgrade
+  "B",            # bugbear
+  "SIM",          # simplify
+  "RUF",          # ruff-specific
+  "BLE",          # no blind `except Exception`
+  "S",            # bandit (shell=True, eval, ...)
+  "PIE", "RET", "C4", "PERF",
+]
+
+ignore = [
+  "RUF001", "RUF002", "RUF003",  # upstream prose uses typographic quotes (’) on purpose
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S311"]  # assert and non-crypto random are fine in tests
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+reportMissingModuleSource = "none"  # sublime-text-stubs are stub-only
+# emmet/ is vendored (see above): its own types are not checked, only used.
+exclude = [".venv", "**/__pycache__", "emmet"]

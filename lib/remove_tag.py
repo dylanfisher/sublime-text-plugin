@@ -1,12 +1,15 @@
+from typing import Any
+
 import sublime
+
 from .utils import narrow_to_non_space
 
 
-def remove_tag(view: sublime.View, edit: sublime.Edit, tag: dict):
-    if 'close' in tag:
+def remove_tag(view: sublime.View, edit: sublime.Edit, tag: Any) -> None:
+    if "close" in tag:
         # Remove open and close tag and dedent inner content
-        open_tag = tag['open']
-        close_tag = tag['close']
+        open_tag = tag["open"]
+        close_tag = tag["close"]
         inner_region = narrow_to_non_space(view, sublime.Region(open_tag.end(), close_tag.begin()))
         if inner_region:
             # Gracefully remove open and close tags and tweak indentation on tag contents
@@ -26,10 +29,10 @@ def remove_tag(view: sublime.View, edit: sublime.Edit, tag: dict):
         else:
             view.erase(edit, open_tag.cover(close_tag))
     else:
-        view.erase(edit, tag['open'])
+        view.erase(edit, tag["open"])
 
 
-def get_line_indent(view: sublime.View, line: sublime.Region) -> str:
+def get_line_indent(view: sublime.View, line: sublime.Region | int) -> str:
     "Returns indentation for given line or line found from given character location"
     if isinstance(line, int):
         line = view.line(line)

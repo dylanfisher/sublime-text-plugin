@@ -1,28 +1,36 @@
 import re
+from typing import Any, TypedDict
+
 import sublime
 
 __doc__ = "Syntax-related methods"
 
-markup_syntaxes = ['html', 'xml', 'xsl', 'jsx', 'haml', 'jade', 'pug', 'slim']
-stylesheet_syntaxes = ['css', 'scss', 'sass', 'less', 'sss', 'stylus', 'postcss']
-xml_syntaxes = ['xml', 'xsl', 'jsx']
-html_syntaxes = ['html']
+markup_syntaxes = ["html", "xml", "xsl", "jsx", "haml", "jade", "pug", "slim"]
+stylesheet_syntaxes = ["css", "scss", "sass", "less", "sss", "stylus", "postcss"]
+xml_syntaxes = ["xml", "xsl", "jsx"]
+html_syntaxes = ["html"]
 
 # NB: avoid circular reference for `emmet_sublime` module,
 # create own settings instance
-settings = None
+settings: sublime.Settings | None = None
 
-def get_settings(key: str, default=None):
+
+class SyntaxInfo(TypedDict):
+    syntax: str
+    type: str
+
+
+def get_settings(key: str, default: Any = None) -> Any:
     "Returns value of given Emmet setting"
     global settings
 
     if settings is None:
-        settings = sublime.load_settings('Emmet.sublime-settings')
+        settings = sublime.load_settings("Emmet.sublime-settings")
 
     return settings.get(key, default)
 
 
-def info(view: sublime.View, pt: int, fallback=None):
+def info(view: sublime.View, pt: int, fallback: str | None = None) -> SyntaxInfo | None:
     """
     Returns Emmet syntax info for given location in view.
     Syntax info is an abbreviation type (either 'markup' or 'stylesheet') and syntax
@@ -34,25 +42,23 @@ def info(view: sublime.View, pt: int, fallback=None):
     """
     syntax = from_pos(view, pt) or fallback
     if syntax:
-        return {
-            'syntax':  syntax,
-            'type': get_type(syntax)
-        }
+        return {"syntax": syntax, "type": get_type(syntax)}
+    return None
 
 
 def doc_syntax(view: sublime.View) -> str:
     "Returns current document syntax"
-    syntax = view.settings().get('syntax', '')
-    syntax = re.split(r'[\\\/]', syntax)[-1]
-    if '.' in syntax:
-        syntax = syntax.split('.')[0]
+    syntax = str(view.settings().get("syntax", "") or "")
+    syntax = re.split(r"[\\\/]", syntax)[-1]
+    if "." in syntax:
+        syntax = syntax.split(".")[0]
     return syntax.lower()
 
 
-def from_pos(view: sublime.View, pt: int):
+def from_pos(view: sublime.View, pt: int) -> str | None:
     "Returns Emmet syntax for given location in view"
-    scopes = get_settings('syntax_scopes', {})
-    if scopes:
+    scopes = get_settings("syntax_scopes", {})
+    if scopes and isinstance(scopes, dict):
         for name, sel in scopes.items():
             if view.match_selector(pt, sel):
                 return name
@@ -60,53 +66,55 @@ def from_pos(view: sublime.View, pt: int):
     return None
 
 
-def get_type(syntax: str) -> str:
+def get_type(syntax: str | None) -> str:
     "Returns type of Emmet abbreviation for given syntax"
-    return 'stylesheet' if syntax in stylesheet_syntaxes else 'markup'
+    return "stylesheet" if syntax in stylesheet_syntaxes else "markup"
 
 
-def is_xml(syntax: str):
+def is_xml(syntax: str | None) -> bool:
     "Check if given syntax is XML dialect"
     return syntax in xml_syntaxes
 
 
-def is_html(syntax: str):
+def is_html(syntax: str | None) -> bool:
     "Check if given syntax is HTML dialect (including XML)"
     return syntax in html_syntaxes or is_xml(syntax)
 
 
-def is_supported(syntax: str):
+def is_supported(syntax: str | None) -> bool:
     "Check if given syntax name is supported by Emmet"
     return syntax in markup_syntaxes or syntax in stylesheet_syntaxes
 
 
-def is_css(syntax: str):
+def is_css(syntax: str | None) -> bool:
     """
     Check if given syntax is a CSS dialect. Note that it’s not the same as stylesheet
     syntax: for example, SASS is a stylesheet but not CSS dialect (but SCSS is)
     """
-    return syntax in ('css', 'scss', 'less')
+    return syntax in ("css", "scss", "less")
 
-def is_jsx(syntax: str):
+
+def is_jsx(syntax: str | None) -> bool:
     "Check if given syntax is JSX"
-    return syntax == 'jsx'
+    return syntax == "jsx"
 
-def is_inline(view: sublime.View, pt: int):
+
+def is_inline(view: sublime.View, pt: int) -> bool:
     "Check if abbreviation in given location must be expanded as single line"
-    scopes = get_settings('inline_scopes', [])
+    scopes = get_settings("inline_scopes", [])
     return matches_selector(view, pt, scopes)
 
 
-def in_activation_scope(view: sublime.View, pt: int):
+def in_activation_scope(view: sublime.View, pt: int) -> bool:
     """
     Check if given location in view can be used for abbreviation marker activation.
     Note that this method implies that caret is in Emmet-supported syntax
     """
-    ignore = get_settings('ignore_scopes', [])
+    ignore = get_settings("ignore_scopes", [])
     if matches_selector(view, pt, ignore):
         return False
 
-    scopes = get_settings('abbreviation_scopes', [])
+    scopes = get_settings("abbreviation_scopes", [])
     if matches_selector(view, pt, scopes):
         return True
 
@@ -114,16 +122,12 @@ def in_activation_scope(view: sublime.View, pt: int):
     # <div>a|</div>
     # in this example, ST returns `punctuation.definition.tag.begin.html`
     # scope, even if caret is actually not in tag. Add some custom checks here
-    if view.match_selector(pt, '(text.html | text.xml) meta.tag punctuation.definition.tag.begin') and view.substr(pt) == '<':
-        return True
+    return bool(
+        view.match_selector(pt, "(text.html | text.xml) meta.tag punctuation.definition.tag.begin")
+        and view.substr(pt) == "<"
+    )
 
-    return False
 
-
-def matches_selector(view: sublime.View, pt: int, selectors: list):
+def matches_selector(view: sublime.View, pt: int, selectors: Any) -> bool:
     "Check if given location in view one of the given selectors"
-    for sel in selectors:
-        if view.match_selector(pt, sel):
-            return True
-
-    return False
+    return any(view.match_selector(pt, sel) for sel in selectors)

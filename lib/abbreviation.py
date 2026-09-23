@@ -1,42 +1,74 @@
-import re
 import html
+import re
 import traceback
+from typing import Any
+
 import sublime
-from ..emmet import Abbreviation as MarkupAbbreviation, markup_abbreviation, stylesheet_abbreviation
+
+from ..emmet import Abbreviation as MarkupAbbreviation
+from ..emmet import markup_abbreviation, stylesheet_abbreviation
 from ..emmet.config import Config
 from ..emmet.stylesheet import CSSAbbreviationScope
-from .emmet_sublime import get_jsx_prefix, expand, extract_abbreviation
-from .utils import pairs, pairs_end, known_tags, replace_with_snippet
-from .context import get_activation_context
+from . import html_highlight, syntax
 from .config import get_preview_config, get_settings, get_user_css
-from . import syntax
-from . import html_highlight
+from .context import get_activation_context
+from .emmet_sublime import expand, extract_abbreviation, get_jsx_prefix
+from .utils import known_tags, pairs, pairs_end, replace_with_snippet
 
-ABBR_REGION_ID = 'emmet-abbreviation'
-ABBR_PREVIEW_ID = 'emmet-abbreviation-preview'
+ABBR_REGION_ID = "emmet-abbreviation"
+ABBR_PREVIEW_ID = "emmet-abbreviation-preview"
 
-re_jsx_abbr_start = re.compile(r'^[a-zA-Z.#\[\(]$')
+re_jsx_abbr_start = re.compile(r"^[a-zA-Z.#\[\(]$")
 re_word_bound = re.compile(r'^[\s>;"\'(){}]?[a-zA-Z.#!@\[\(]$')
 re_stylesheet_word_bound = re.compile(r'^[\s;"\'(){}]?[a-zA-Z!@]$')
-re_stylesheet_preview_check = re.compile(r'/^:\s*;?$/')
-re_word_start = re.compile(r'^[a-z]', re.IGNORECASE)
+re_stylesheet_preview_check = re.compile(r"/^:\s*;?$/")
+re_word_start = re.compile(r"^[a-z]", re.IGNORECASE)
 re_bound_char = re.compile(r'^[\s>;"\']')
-re_complex_abbr = re.compile(r'[.#>^+*\[\(\{\/]')
-re_lorem = re.compile(r'^lorem')
+re_complex_abbr = re.compile(r"[.#>^+*\[\(\{\/]")
+re_lorem = re.compile(r"^lorem")
 
-_cache = {}
-_trackers = {}
-_last_pos = {}
-_forced_indicator = {}
-_phantom_preview = {}
-_has_popup_preview = {}
+_cache: dict[int, AbbreviationTracker] = {}
+_trackers: dict[int, AbbreviationTracker] = {}
+_last_pos: dict[int, int] = {}
+_forced_indicator: dict[int, sublime.PhantomSet] = {}
+_phantom_preview: dict[int, sublime.PhantomSet] = {}
+_has_popup_preview: dict[int, bool] = {}
 
 
 class AbbreviationTracker:
-    __slots__ = ('region', 'abbreviation', 'forced', 'forced', 'offset',
-                 'last_pos', 'config', 'simple', 'preview', 'line',
-                 'error', 'valid_candidate')
-    def __init__(self, abbreviation: str, region: sublime.Region, config: Config, params: dict = None):
+    __slots__ = (
+        "abbreviation",
+        "config",
+        "error",
+        "forced",
+        "last_pos",
+        "line",
+        "offset",
+        "preview",
+        "region",
+        "simple",
+        "valid_candidate",
+    )
+
+    abbreviation: str
+    region: sublime.Region
+    config: Config
+    forced: bool
+    offset: int
+    line: sublime.Region
+    last_pos: int
+    valid_candidate: bool
+    simple: bool
+    preview: str
+    error: dict[str, Any] | None
+
+    def __init__(
+        self,
+        abbreviation: str,
+        region: sublime.Region,
+        config: Config,
+        params: dict[str, Any] | None = None,
+    ) -> None:
         self.abbreviation = abbreviation
         "Range in editor for abbreviation"
 
@@ -75,36 +107,38 @@ class AbbreviationTracker:
 
 
 class AbbreviationTrackerValid(AbbreviationTracker):
-    __slots__ = ('simple', 'preview', 'valid_candidate')
+    __slots__ = ("preview", "simple", "valid_candidate")
 
-    def __init__(self, *args):
+    def __init__(self, *args: Any) -> None:
         self.simple = False
-        self.preview = ''
+        self.preview = ""
         super().__init__(*args)
 
         self.valid_candidate = is_valid_candidate(self.abbreviation, self.config)
 
+
 class AbbreviationTrackerError(AbbreviationTracker):
-    def __init__(self, *args):
+    def __init__(self, *args: Any) -> None:
         self.error = None
         super().__init__(*args)
 
 
-def get_last_pos(editor: sublime.View) -> int:
+def get_last_pos(editor: sublime.View) -> int | None:
     "Returns last known location of caret in given editor"
     return _last_pos.get(editor.id())
 
 
-def set_last_pos(editor: sublime.View, pos: int):
+def set_last_pos(editor: sublime.View, pos: int) -> None:
     "Sets last known caret location for given editor"
     _last_pos[editor.id()] = pos
 
 
-def get_tracker(editor: sublime.View) -> AbbreviationTracker:
+def get_tracker(editor: sublime.View) -> AbbreviationTracker | None:
     "Returns abbreviation tracker for given editor, if any"
     return _trackers.get(editor.id())
 
-def typing_abbreviation(editor: sublime.View, pos: int) -> AbbreviationTracker:
+
+def typing_abbreviation(editor: sublime.View, pos: int) -> AbbreviationTracker | None:
     "Detects if user is typing abbreviation at given location"
     # Start tracking only if user starts abbreviation typing: entered first
     # character at the word bound
@@ -137,23 +171,29 @@ def typing_abbreviation(editor: sublime.View, pos: int) -> AbbreviationTracker:
 
         config = get_activation_context(editor, pos)
         if config is not None:
-            ctx_name = config.context['name'] if config.context else CSSAbbreviationScope.Global
-            check_bounds_scope = (CSSAbbreviationScope.Global,
-                                  CSSAbbreviationScope.Section,
-                                  CSSAbbreviationScope.Property)
-            if config.type == 'stylesheet' and ctx_name in check_bounds_scope and not re_stylesheet_word_bound.match(prefix):
+            ctx_name = config.context["name"] if config.context else CSSAbbreviationScope.Global
+            check_bounds_scope = (
+                CSSAbbreviationScope.Global,
+                CSSAbbreviationScope.Section,
+                CSSAbbreviationScope.Property,
+            )
+            if (
+                config.type == "stylesheet"
+                and ctx_name in check_bounds_scope
+                and not re_stylesheet_word_bound.match(prefix)
+            ):
                 # Additional check for stylesheet abbreviation start: it’s slightly
                 # differs from markup prefix, but we need activation context
                 # to ensure that context under caret is CSS
-                return
+                return None
 
-            tracker = start_tracking(editor, start, end, {'offset': offset, 'config': config})
+            tracker = start_tracking(editor, start, end, {"offset": offset, "config": config})
 
             if not tracker or isinstance(tracker, AbbreviationTrackerError):
                 stop_tracking(editor)
                 return None
 
-            if get_by_key(config, 'context.name') == CSSAbbreviationScope.Section:
+            if get_by_key(config, "context.name") == CSSAbbreviationScope.Section:
                 # Make a silly check for section context: if user start typing
                 # CSS selector at the end of file, it will be treated as property
                 # name and provide unrelated completion by default.
@@ -164,24 +204,28 @@ def typing_abbreviation(editor: sublime.View, pos: int) -> AbbreviationTracker:
                 preview = tracker.preview
                 abbreviation = tracker.abbreviation
 
-                if preview.startswith(abbreviation) and \
-                    re_stylesheet_preview_check.match(preview[len(abbreviation):]):
+                if preview.startswith(abbreviation) and re_stylesheet_preview_check.match(
+                    preview[len(abbreviation) :]
+                ):
                     stop_tracking(editor)
-                    return
+                    return None
 
             mark(editor, tracker)
             return tracker
+    return None
 
 
-def start_tracking(editor: sublime.View, start: int, pos: int, params: dict = None) -> AbbreviationTracker:
+def start_tracking(
+    editor: sublime.View, start: int, pos: int, params: dict[str, Any] | None = None
+) -> AbbreviationTracker | None:
     """
     Starts abbreviation tracking for given editor
     :param start Location of abbreviation start
     :param pos Current caret position, must be greater that `start`
     """
-    config = get_by_key(params, 'config') or get_activation_context(editor, start)
+    config = get_by_key(params, "config") or get_activation_context(editor, start)
 
-    tracker_params = {'config': config}
+    tracker_params = {"config": config}
     if params:
         tracker_params.update(params)
 
@@ -191,21 +235,23 @@ def start_tracking(editor: sublime.View, start: int, pos: int, params: dict = No
         return set_active_tracker(editor, tracker)
 
     _dispose_tracker(editor)
+    return None
 
 
-def stop_tracking(editor: sublime.View, params: dict = {}):
+def stop_tracking(editor: sublime.View, params: dict[str, Any] | None = None) -> None:
     "Stops abbreviation tracking in given editor instance"
+    params = params or {}
     tracker = get_tracker(editor)
     if tracker:
         unmark(editor)
 
-        if tracker and tracker.forced:
-            edit = params.get('edit')
+        if tracker.forced:
+            edit = params.get("edit")
             if edit:
                 # Contents of forced abbreviation must be removed
-                editor.replace(edit, tracker.region, '')
+                editor.replace(edit, tracker.region, "")
 
-        if params.get('force') or tracker.forced:
+        if params.get("force") or tracker.forced:
             _dispose_cache_tracker(editor)
         else:
             # Store tracker in history to restore it if user continues editing
@@ -222,21 +268,24 @@ def set_active_tracker(editor: sublime.View, tracker: AbbreviationTracker) -> Ab
     return tracker
 
 
-def create_tracker(editor: sublime.View, region: sublime.Region, params: dict) -> AbbreviationTracker:
+def create_tracker(
+    editor: sublime.View, region: sublime.Region, params: Any
+) -> AbbreviationTracker | None:
     """
     Creates abbreviation tracker for given range in editor. Parses contents
     of abbreviation in range and returns either valid abbreviation tracker,
     error tracker or `None` if abbreviation cannot be created from given range
+    `params` is a dict or a previous tracker (both are read via get_by_key()).
     """
-    config = get_by_key(params, 'config')
-    offset = get_by_key(params, 'offset', 0)
-    forced = get_by_key(params, 'forced', False)
+    config: Config = get_by_key(params, "config")
+    offset = get_by_key(params, "offset", 0)
+    forced = get_by_key(params, "forced", False)
     line = editor.line(region.begin())
 
-    if region.a > region.b or (region.a == region.b and not forced) or not line.contains(region):
+    if region.a > region.b or (region.a == region.b and not forced) or region not in line:
         # * Invalid range
         # * Mulitline regions are not supported
-        return
+        return None
 
     abbreviation = editor.substr(region)
     if offset:
@@ -244,59 +293,63 @@ def create_tracker(editor: sublime.View, region: sublime.Region, params: dict) -
 
     # Basic validation: do not allow empty abbreviations
     # or newlines in abbreviations
-    if (not abbreviation and not forced) or '\n' in abbreviation or '\r' in abbreviation:
-        return
+    if (not abbreviation and not forced) or "\n" in abbreviation or "\r" in abbreviation:
+        return None
 
-    tracker_params = {
-        'forced': forced,
-        'offset': offset,
-        'line': line,
-        'last_pos': region.end(),
+    tracker_params: dict[str, Any] = {
+        "forced": forced,
+        "offset": offset,
+        "line": line,
+        "last_pos": region.end(),
     }
 
     try:
-        tracker_params['simple'] = False
+        tracker_params["simple"] = False
 
-        if config.type == 'stylesheet':
+        if config.type == "stylesheet":
             parsed_abbr = stylesheet_abbreviation(abbreviation, config)
         else:
-            parsed_abbr = markup_abbreviation(abbreviation, config)
+            parsed_abbr: Any = markup_abbreviation(abbreviation, config)
             jsx = config and syntax.is_jsx(config.syntax) and bool(get_jsx_prefix())
-            tracker_params['simple'] = not jsx and is_simple_markup_abbreviation(parsed_abbr)
+            tracker_params["simple"] = not jsx and is_simple_markup_abbreviation(parsed_abbr)
 
         preview_config = get_preview_config(config)
-        tracker_params['preview'] = expand(abbreviation, preview_config)
-        if forced or config.type != 'stylesheet' or tracker_params['preview']:
+        tracker_params["preview"] = expand(abbreviation, preview_config)
+        if forced or config.type != "stylesheet" or tracker_params["preview"]:
             # Create tracker only if preview is not empty for non-forced abbreviation.
             # Empty preview means Emmet was unable to find proper match for given
             # abbreviation. Most likely it happens in stylesheets in `Section` scope
             # NB: empty preview is perfectly valid case for markup abbreviations,
             # for example, `()` abbreviation produces empty output
             return AbbreviationTrackerValid(abbreviation, region, config, tracker_params)
-    except Exception as err:
-        if hasattr(err, 'message') and hasattr(err, 'pos'):
-            tracker_params['error'] = {
-                'message': err.message.split('\n')[0],
-                'pos': err.pos,
-                'pointer': '%s^' % ('-' * err.pos, ) if err.pos is not None else ''
+    # The parser raises its own scanner exceptions (with .message/.pos) for invalid
+    # abbreviations; anything else is a bug that is logged, not a crash while typing.
+    except Exception as err:  # noqa: BLE001
+        message = getattr(err, "message", None)
+        err_pos = getattr(err, "pos", None)
+        if message is not None and hasattr(err, "pos"):
+            tracker_params["error"] = {
+                "message": message.split("\n")[0],
+                "pos": err_pos,
+                "pointer": f"{'-' * err_pos}^" if err_pos is not None else "",
             }
             return AbbreviationTrackerError(abbreviation, region, config, tracker_params)
-        else:
-            print('Error while parsing abbreviation')
-            traceback.print_exc()
+        print("Error while parsing abbreviation")
+        traceback.print_exc()
+    return None
 
 
-def store_tracker(editor: sublime.View, tracker: AbbreviationTracker):
+def store_tracker(editor: sublime.View, tracker: AbbreviationTracker) -> None:
     "Stores given tracker in separate cache to restore later"
     _cache[editor.id()] = tracker
 
 
-def get_stored_tracker(editor: sublime.View) -> AbbreviationTracker:
+def get_stored_tracker(editor: sublime.View) -> AbbreviationTracker | None:
     "Returns stored tracker for given editor proxy, if any"
     return _cache.get(editor.id())
 
 
-def restore_tracker(editor: sublime.View, pos: int) -> AbbreviationTracker:
+def restore_tracker(editor: sublime.View, pos: int) -> AbbreviationTracker | None:
     "Tries to restore abbreviation tracker for given editor at specified position"
     tracker = get_stored_tracker(editor)
 
@@ -304,7 +357,11 @@ def restore_tracker(editor: sublime.View, pos: int) -> AbbreviationTracker:
         r = sublime.Region(tracker.region.begin() + tracker.offset, tracker.region.end())
 
         if editor.substr(r) == tracker.abbreviation:
-            if tracker.config and tracker.config.type == 'stylesheet' and not at_word_bound(editor, r):
+            if (
+                tracker.config
+                and tracker.config.type == "stylesheet"
+                and not at_word_bound(editor, r)
+            ):
                 # NB: dirty check for word bound on the right of abbreviation.
                 # For example, expanding `p` would produce `padding: ;`, but moving
                 # caret to first `p` will expand tracker since it matches
@@ -320,10 +377,12 @@ def restore_tracker(editor: sublime.View, pos: int) -> AbbreviationTracker:
 
 def at_word_bound(editor: sublime.View, r: sublime.Region) -> bool:
     ch = editor.substr(r.end())
-    return not ch or re_bound_char.match(ch)
+    return not ch or re_bound_char.match(ch) is not None
 
 
-def suggest_abbreviation_tracker(view: sublime.View, pos: int, force = False) -> AbbreviationTracker:
+def suggest_abbreviation_tracker(
+    view: sublime.View, pos: int, force: bool = False
+) -> AbbreviationTracker | None:
     "Tries to extract abbreviation from given position and returns tracker for it, if available"
     trk = get_tracker(view)
     if trk and not trk.region.contains(pos):
@@ -337,12 +396,14 @@ def suggest_abbreviation_tracker(view: sublime.View, pos: int, force = False) ->
             abbr = extract_abbreviation(view, pos, config)
             if abbr:
                 offset = abbr.location - abbr.start
-                trk = start_tracking(view, abbr.start, abbr.end, {'config': config, 'offset': offset})
+                trk = start_tracking(
+                    view, abbr.start, abbr.end, {"config": config, "offset": offset}
+                )
 
     return trk
 
 
-def handle_change(editor: sublime.View, pos: int) -> AbbreviationTracker:
+def handle_change(editor: sublime.View, pos: int) -> AbbreviationTracker | None:
     "Handle content change in given editor instance"
     tracker = get_tracker(editor)
     editor_last_pos = get_last_pos(editor)
@@ -350,7 +411,11 @@ def handle_change(editor: sublime.View, pos: int) -> AbbreviationTracker:
 
     if not tracker:
         # No active tracker, check if we user is actually typing abbreviation
-        if editor_last_pos is not None and editor_last_pos == pos - 1 and allow_tracking(editor, pos):
+        if (
+            editor_last_pos is not None
+            and editor_last_pos == pos - 1
+            and allow_tracking(editor, pos)
+        ):
             return typing_abbreviation(editor, pos)
         return None
 
@@ -372,21 +437,21 @@ def handle_change(editor: sublime.View, pos: int) -> AbbreviationTracker:
 
     # Handle edge case: empty forced abbreviation is allowed
     if region.empty() and tracker.forced:
-        tracker.abbreviation = ''
+        tracker.abbreviation = ""
         return tracker
 
     next_tracker = create_tracker(editor, region, tracker)
 
     if not next_tracker or (not tracker.forced and not is_valid_tracker(next_tracker, region, pos)):
         stop_tracking(editor)
-        return
+        return None
 
     next_tracker.last_pos = pos
 
     return set_active_tracker(editor, next_tracker)
 
 
-def handle_selection_change(editor: sublime.View, pos: int) -> AbbreviationTracker:
+def handle_selection_change(editor: sublime.View, pos: int) -> AbbreviationTracker | None:
     "Handle selection (caret) change in given editor instance"
     set_last_pos(editor, pos)
 
@@ -397,9 +462,10 @@ def handle_selection_change(editor: sublime.View, pos: int) -> AbbreviationTrack
     if tracker:
         tracker.last_pos = pos
         return tracker
+    return None
 
 
-def dispose_editor(editor: sublime.View):
+def dispose_editor(editor: sublime.View) -> None:
     """
     Method should be called when given editor instance will be no longer
     available to clean up cached data
@@ -410,24 +476,23 @@ def dispose_editor(editor: sublime.View):
     remove_cache_item(editor, _last_pos)
 
 
-def _dispose_tracker(editor: sublime.View):
+def _dispose_tracker(editor: sublime.View) -> None:
     remove_cache_item(editor, _trackers)
 
 
-def _dispose_cache_tracker(editor: sublime.View):
+def _dispose_cache_tracker(editor: sublime.View) -> None:
     remove_cache_item(editor, _cache)
 
 
-def remove_cache_item(editor: sublime.View, cache: dict):
+def remove_cache_item(editor: sublime.View, cache: dict[int, Any]) -> None:
     e_id = editor.id()
-    if e_id in cache:
-        del cache[e_id]
+    cache.pop(e_id, None)
 
 
-def get_by_key(obj, key, default_value=None):
+def get_by_key(obj: Any, key: str | list[str], default_value: Any = None) -> Any:
     "A universal method for accessing deep property by dot-separated key"
     if isinstance(key, str):
-        key = key.split('.')
+        key = key.split(".")
 
     for k in key:
         if obj is None:
@@ -468,7 +533,7 @@ def is_valid_tracker(tracker: AbbreviationTracker, region: sublime.Region, pos: 
         start = region.begin()
         target_pos = region.end()
 
-        if '</' in abbreviation:
+        if "</" in abbreviation:
             # XXX Silly check for auto-consed tag in JSX (see Naomi syntax)
             # Find better solution
             return False
@@ -494,7 +559,7 @@ def is_simple_markup_abbreviation(abbr: MarkupAbbreviation) -> bool:
         first = abbr.children[0]
         # XXX silly check for common snippets like `!`. Should read contents
         # of expanded abbreviation instead
-        return not first.name or re_word_start.match(first.name)
+        return not first.name or re_word_start.match(first.name) is not None
 
     return not abbr.children
 
@@ -510,7 +575,7 @@ def allow_tracking(editor: sublime.View, pos: int) -> bool:
 
 def is_enabled(view: sublime.View, pos: int) -> bool:
     "Check if Emmet abbreviation tracking is enabled"
-    auto_mark = get_settings('auto_mark', False)
+    auto_mark = get_settings("auto_mark", False)
 
     # `auto_mark` could be a boolean or string, indicating type of allowed abbreviation:
     # either `markup` or `stylesheet`
@@ -525,23 +590,21 @@ def is_enabled(view: sublime.View, pos: int) -> bool:
     if not syntax_info:
         return False
 
-    return syntax_info['type'] == auto_mark
+    return syntax_info["type"] == auto_mark
 
 
-def mark(editor: sublime.View, tracker: AbbreviationTracker):
+def mark(editor: sublime.View, tracker: AbbreviationTracker) -> None:
     "Marks tracker in given view"
-    scope = get_settings('marker_scope', 'region.accent')
+    scope = str(get_settings("marker_scope", "region.accent"))
     editor.erase_regions(ABBR_REGION_ID)
 
     if tracker.valid_candidate:
         # Do not mark abbreviation if it’s not known candidate
         mark_opt = sublime.DRAW_SOLID_UNDERLINE | sublime.DRAW_NO_FILL | sublime.DRAW_NO_OUTLINE
-        editor.add_regions(ABBR_REGION_ID, [tracker.region], scope, '', mark_opt)
+        editor.add_regions(ABBR_REGION_ID, [tracker.region], scope, "", mark_opt)
 
     if isinstance(tracker, AbbreviationTrackerValid) and tracker.forced:
-        phantoms = [
-            sublime.Phantom(tracker.region, forced_indicator('⋮>'), sublime.LAYOUT_INLINE)
-        ]
+        phantoms = [sublime.Phantom(tracker.region, forced_indicator("⋮>"), sublime.LAYOUT_INLINE)]
 
         key = editor.id()
         if key not in _forced_indicator:
@@ -549,7 +612,7 @@ def mark(editor: sublime.View, tracker: AbbreviationTracker):
         _forced_indicator[key].update(phantoms)
 
 
-def unmark(editor: sublime.View):
+def unmark(editor: sublime.View) -> None:
     "Remove current tracker marker from given view"
     editor.erase_regions(ABBR_REGION_ID)
     editor.erase_phantoms(ABBR_REGION_ID)
@@ -558,32 +621,39 @@ def unmark(editor: sublime.View):
 
 def is_preview_enabled(tracker: AbbreviationTracker) -> bool:
     "Check if preview is enabled for given tracker"
-    preview = get_settings('abbreviation_preview', True)
+    preview = get_settings("abbreviation_preview", True)
     return preview is True or preview == tracker.config.type
 
 
-def show_preview(editor: sublime.View, tracker: AbbreviationTracker):
+def show_preview(editor: sublime.View, tracker: AbbreviationTracker) -> None:
     "Displays expanded preview of abbreviation in current tracker in given view"
     if not is_preview_enabled(tracker):
         return
 
     key = editor.id()
     content = None
-    as_phantom = tracker.config.type == 'stylesheet'
+    as_phantom = tracker.config.type == "stylesheet"
 
-    if isinstance(tracker, AbbreviationTrackerError):
+    if isinstance(tracker, AbbreviationTrackerError) and tracker.error:
         # Display error snippet
         err = tracker.error
-        snippet = html.escape( re.sub(r'\s+at\s\d+$', '', err['message']), False)
-        content = '<div class="error pointer">%s</div><div class="error message">%s</div>' % (err['pointer'], snippet)
-    elif isinstance(tracker, AbbreviationTrackerValid) and tracker.abbreviation and (tracker.forced or as_phantom or not tracker.simple):
+        snippet = html.escape(re.sub(r"\s+at\s\d+$", "", err["message"]), False)
+        content = (
+            f'<div class="error pointer">{err["pointer"]}</div>'
+            f'<div class="error message">{snippet}</div>'
+        )
+    elif (
+        isinstance(tracker, AbbreviationTrackerValid)
+        and tracker.abbreviation
+        and (tracker.forced or as_phantom or not tracker.simple)
+    ):
         snippet = tracker.preview
-        if tracker.config.type != 'stylesheet':
+        if tracker.config.type != "stylesheet":
             if syntax.is_html(tracker.config.syntax):
                 snippet = html_highlight.highlight(snippet)
             else:
                 snippet = html.escape(snippet, False)
-            content = '<div class="markup-preview">%s</div>' % format_snippet(snippet)
+            content = f'<div class="markup-preview">{format_snippet(snippet)}</div>'
         else:
             content = format_snippet(snippet)
 
@@ -606,9 +676,11 @@ def show_preview(editor: sublime.View, tracker: AbbreviationTracker):
             flags=sublime.COOPERATE_WITH_AUTO_COMPLETE,
             location=tracker.region.begin(),
             max_width=400,
-            max_height=300)
+            max_height=300,
+        )
 
-def hide_preview(editor: sublime.View):
+
+def hide_preview(editor: sublime.View) -> None:
     "Hides preview of current abbreviation in given view"
     key = editor.id()
     if _has_popup_preview.get(key):
@@ -619,88 +691,83 @@ def hide_preview(editor: sublime.View):
         del _phantom_preview[key]
 
 
-def preview_popup_html(content: str):
-    return """
+def preview_popup_html(content: str) -> str:
+    return f"""
     <body id="emmet-preview-popup">
         <style>
-            body { line-height: 1.5rem; }
-            .error { color: red }
-            .error.message { font-size: 11px; line-height: 1.3rem; }
-            .markup-preview { font-size: 11px; line-height: 1.3rem; }
-            %s
-            %s
+            body {{ line-height: 1.5rem; }}
+            .error {{ color: red }}
+            .error.message {{ font-size: 11px; line-height: 1.3rem; }}
+            .markup-preview {{ font-size: 11px; line-height: 1.3rem; }}
+            {html_highlight.styles()}
+            {get_user_css()}
         </style>
-        <div>%s</div>
+        <div>{content}</div>
     </body>
-    """ % (html_highlight.styles(), get_user_css(), content)
+    """
 
 
-def preview_phantom_html(content: str):
-    return """
+def preview_phantom_html(content: str) -> str:
+    return f"""
     <body id="emmet-preview-phantom">
         <style>
-            body {
+            body {{
                 background-color: #1D9B45;
                 color: #fff;
                 border-radius: 3px;
                 padding: 0 3px;
                 position: relative;
-            }
+            }}
 
-            .error { color: red }
-            %s
+            .error {{ color: red }}
+            {get_user_css()}
         </style>
-        <div class="main">%s</div>
+        <div class="main">{content}</div>
     </body>
-    """ % (get_user_css(), content)
+    """
 
 
-def forced_indicator(content: str):
+def forced_indicator(content: str) -> str:
     "Returns HTML content of forced abbreviation indicator"
-    return """
+    return f"""
         <body id="emmet-forced-abbreviation">
             <style>
-                #emmet-forced-abbreviation .indicator {
+                #emmet-forced-abbreviation .indicator {{
                     background-color: var(--greenish);
                     color: #fff;
                     border-radius: 3px;
                     padding: 0 3px;
-                }
-                %s
+                }}
+                {get_user_css()}
             </style>
-            <div class="indicator">%s</div>
+            <div class="indicator">{content}</div>
         </body>
-        """ % (get_user_css(), content)
+        """
 
 
-def format_snippet(text: str, class_name=None):
-    class_attr = (' class="%s"' % class_name) if class_name else ''
-    line_html = '<div%s style="padding-left: %dpx"><code>%s</code></div>'
-    lines = [line_html % (class_attr, indent_size(line, 20), line) for line in text.splitlines()]
+def format_snippet(text: str, class_name: str | None = None) -> str:
+    class_attr = f' class="{class_name}"' if class_name else ""
+    lines = [
+        f'<div{class_attr} style="padding-left: {indent_size(line, 20):d}px">'
+        f"<code>{line}</code></div>"
+        for line in text.splitlines()
+    ]
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
-def indent_size(line, width=1):
-    m = re.match(r'\t+', line)
+def indent_size(line: str, width: int = 1) -> int:
+    m = re.match(r"\t+", line)
     return len(m.group(0)) * width if m else 0
 
 
-def plugin_unloaded():
+def plugin_unloaded() -> None:
     for wnd in sublime.windows():
         for view in wnd.views():
             unmark(view)
 
-def main_view(fn):
-    "Method decorator for running actions in code views only"
-    def wrapper(self, view):
-        if not view.settings().get('is_widget'):
-            fn(self, view)
 
-    return wrapper
-
-
-def expand_tracker(editor: sublime.View, edit: sublime.Edit, tracker: AbbreviationTracker):
+def expand_tracker(editor: sublime.View, edit: sublime.Edit, tracker: AbbreviationTracker) -> None:
     "Expands abbreviation from given tracker"
     if isinstance(tracker, AbbreviationTrackerValid):
         snippet = expand(tracker.abbreviation, tracker.config)
@@ -717,11 +784,13 @@ def is_valid_candidate(abbr: str, config: Config) -> bool:
     # * upper-cased (JSX, Svelte components)
     # * known HTML tags
     # * known Emmet snippets
-    if config.type == 'markup' and config.syntax in get_settings('known_snippets_only', []):
-        return '-' in abbr \
-            or (abbr and abbr[0].isupper()) \
-            or abbr in known_tags \
-            or abbr in config.snippets \
+    if config.type == "markup" and config.syntax in get_settings("known_snippets_only", []):
+        return bool(
+            "-" in abbr
+            or (abbr and abbr[0].isupper())
+            or abbr in known_tags
+            or abbr in config.snippets
             or re_lorem.match(abbr)
+        )
 
     return True

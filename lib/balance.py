@@ -1,16 +1,19 @@
 import sublime
+
 from . import emmet_sublime as emmet
 from . import syntax
 from .utils import get_content, to_region
 
 
-def push_range(items, region):
-    last = items and items[-1]
-    if not last or last != region and region:
+def push_range(items: list[sublime.Region], region: sublime.Region) -> None:
+    last = items[-1] if items else None
+    if not last or (last != region and region):
         items.append(region)
 
 
-def get_regions(view: sublime.View, pt: int, syntax_name: str, direction='outward'):
+def get_regions(
+    view: sublime.View, pt: int, syntax_name: str, direction: str = "outward"
+) -> list[sublime.Region]:
     "Returns regions for balancing"
     content = get_content(view)
 
@@ -18,7 +21,7 @@ def get_regions(view: sublime.View, pt: int, syntax_name: str, direction='outwar
         regions = emmet.balance_css(content, pt, direction)
         return [to_region(r) for r in regions]
 
-    result = []
+    result: list[sublime.Region] = []
     tags = emmet.balance(content, pt, direction, syntax.is_xml(syntax_name))
 
     for tag in tags:
@@ -30,16 +33,16 @@ def get_regions(view: sublime.View, pt: int, syntax_name: str, direction='outwar
         else:
             push_range(result, sublime.Region(tag.open[0], tag.open[1]))
 
-    result.sort(key=lambda v: v.begin(), reverse=direction == 'outward')
+    result.sort(key=lambda v: v.begin(), reverse=direction == "outward")
     return result
 
 
-def balance_inward(view, syntax_name):
+def balance_inward(view: sublime.View, syntax_name: str) -> list[sublime.Region]:
     "Returns inward balanced ranges from current view's selection"
     result = []
 
     for sel in view.sel():
-        regions = get_regions(view, sel.begin(), syntax_name, 'inward')
+        regions = get_regions(view, sel.begin(), syntax_name, "inward")
 
         # Try to find range which equals to selection: we should pick leftmost
         ix = -1
@@ -55,7 +58,7 @@ def balance_inward(view, syntax_name):
         elif ix == -1:
             # No match found, pick closest region
             for r in regions:
-                if r.contains(sel):
+                if sel in r:
                     target_region = r
                     break
 
@@ -64,15 +67,15 @@ def balance_inward(view, syntax_name):
     return result
 
 
-def balance_outward(view, syntax_name):
+def balance_outward(view: sublime.View, syntax_name: str) -> list[sublime.Region]:
     "Returns outward balanced ranges from current view's selection"
     result = []
 
     for sel in view.sel():
-        regions = get_regions(view, sel.begin(), syntax_name, 'outward')
+        regions = get_regions(view, sel.begin(), syntax_name, "outward")
         target_region = sel
         for r in regions:
-            if r.contains(sel) and r.end() > sel.end():
+            if sel in r and r.end() > sel.end():
                 target_region = r
                 break
 

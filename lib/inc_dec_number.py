@@ -1,7 +1,7 @@
 import sublime
 
 
-def update(view: sublime.View, edit: sublime.Edit, delta=1):
+def update(view: sublime.View, edit: sublime.Edit, delta: float = 1) -> None:
     next_selections = []
     selections = view.sel()
     for sel in selections:
@@ -26,7 +26,7 @@ def update(view: sublime.View, edit: sublime.Edit, delta=1):
     selections.add_all(next_selections)
 
 
-def extract_number(text: str, pos: int):
+def extract_number(text: str, pos: int) -> tuple[int, int] | None:
     "Extracts number from text at given location"
     has_dot = False
     end = pos
@@ -35,7 +35,7 @@ def extract_number(text: str, pos: int):
     # Read ahead for possible numbers
     while end < len(text):
         ch = text[end]
-        if ch == '.':
+        if ch == ".":
             if has_dot:
                 break
             has_dot = True
@@ -46,7 +46,7 @@ def extract_number(text: str, pos: int):
     # Read backward for possible numerics
     while start > 0:
         ch = text[start - 1]
-        if ch == '.':
+        if ch == ".":
             if has_dot:
                 break
             has_dot = True
@@ -55,27 +55,29 @@ def extract_number(text: str, pos: int):
         start -= 1
 
     # Negative number?
-    if start > 0 and text[start - 1] == '-':
+    if start > 0 and text[start - 1] == "-":
         start -= 1
 
     if start != end:
         return (start, end)
+    return None
 
-def update_number(num: str, delta: float, precision=3):
+
+def update_number(num: str, delta: float, precision: int = 3) -> str | None:
     "Increments given number with `delta` and returns formatted result"
     try:
-        fmt = '%.' + str(precision) + 'f'
+        fmt = "%." + str(precision) + "f"
         value = float(num) + delta
         neg = value < 0
         result = fmt % abs(value)
 
         # Trim trailing zeroes and optionally decimal number
-        result = result.rstrip('0').rstrip('.')
+        result = result.rstrip("0").rstrip(".")
 
         # Trim leading zero if input value doesn't have it
-        if (num[0] == '.' or num[0:2] == '-.') and result[0] == '0':
+        if (num[0] == "." or num[0:2] == "-.") and result[0] == "0":
             result = result[1:]
 
-        return '-{0}'.format(result) if neg else result
-    except:
+        return f"-{result}" if neg else result
+    except ValueError:  # not a number
         return None
