@@ -107,6 +107,29 @@ Sublime Text build 4213, Python 3.14.6, macOS 26.6.2, Apple M5 Max. Median of 20
 - **Memory**: Emmet keeps no indexes, only one tracker per view, so there was nothing
   to measure.
 
+## After hardening
+
+The hardening commit added setting type checks on the hot paths. A second
+back-to-back pair (upstream vs. the final code, 10k-line fixtures):
+
+| Benchmark | Before | After | Change |
+|---|---:|---:|---:|
+| cmd emmet_expand_abbreviation ul>li*3 (html 10k) | 33.503 ms | 14.184 ms | -57.7% |
+| on_query_completions: after ul>li (html 10k) | 87.686 ms | 11.642 ms | -86.7% |
+| load: Emmet.main | 5.689 ms | 6.081 ms | +6.9% |
+| on_selection_modified: move caret (html 10k) | 0.047 ms | 0.051 ms | +8.6% |
+| on_selection_modified: move caret (python 10k) | 0.051 ms | 0.056 ms | +9.8% |
+| reference: 1x native move by characters (html 10k) | 0.126 ms | 0.138 ms | +9.3% |
+| on_query_context: Tab key contexts (html 10k) | 87.731 ms | 11.689 ms | -86.7% |
+| tag preview on: caret in text (html 10k) | 68.718 ms | 0.105 ms | -99.8% |
+| on_modified: type 1st abbr char (html 10k) | 88.555 ms | 11.011 ms | -87.6% |
+| on_modified: type 1st abbr char (css 10k) | 30.134 ms | 3.037 ms | -89.9% |
+| on_modified: type 1st abbr char (python 10k) | 0.092 ms | 0.098 ms | +6.1% |
+| on_modified: type 2nd abbr char (html 10k) | 0.147 ms | 0.175 ms | +18.9% |
+
+The big wins hold. The +6% to +19% rows are 5-28 µs per event; the native
+`reference` row moved +9% in the same pair, so most of that is session noise.
+
 ## Protocol
 
 Each row is the median of 20 timed runs after 3 warm-ups with GC paused
