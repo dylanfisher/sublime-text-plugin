@@ -1,0 +1,9 @@
+# Coverage for UnitTesting (st-test --coverage). The vendored py-emmet core and the
+# tests themselves are not part of the plugin under test.
+[run]
+omit =
+    */emmet/*
+    */tests/*
+
+[report]
+show_missing = True
