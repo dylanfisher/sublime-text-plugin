@@ -1,10 +1,10 @@
-"""Smaller units: syntax/config helpers, CSS context detection, previews, telemetry,
+"""Smaller units: syntax/config helpers, CSS context detection, previews,
 image-size parsing and the utils module."""
 
 import os
 import struct
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import sublime
 
@@ -16,7 +16,6 @@ from ..lib import (
     html_highlight,
     inc_dec_number,
     syntax,
-    telemetry,
     update_image_size,
     utils,
 )
@@ -480,67 +479,3 @@ class TestImageSize(EmmetTestCase):
                 self.set_text('<img src="p.png"|>')
                 self.cmd("emmet_update_image_size")
                 self.assertEqual(self.text(), '<img src="p.png">')
-
-
-class TestTelemetry(EmmetTestCase):
-    def setUp(self):
-        super().setUp()
-        self._queue = list(telemetry.queue)
-        telemetry.queue.clear()
-
-    def tearDown(self):
-        telemetry.queue[:] = self._queue
-        super().tearDown()
-
-    def test_track_action_respects_setting(self):
-        with patch.object(telemetry, "get_settings", return_value=False):
-            telemetry.track_action("A")
-        self.assertEqual(telemetry.queue, [])
-
-    def test_queue_and_flush(self):
-        with patch.object(telemetry.sublime, "set_timeout_async") as later:
-            telemetry.send_tracking_action("A", "label", "1")
-            self.assertTrue(later.called)
-        self.assertEqual(telemetry.queue[0]["el"], "label")
-        opener = MagicMock()
-        with patch.object(telemetry.urllib.request, "urlopen", opener):
-            telemetry._flush_queue()
-        self.assertEqual(telemetry.queue, [])
-        self.assertEqual(opener.call_args.kwargs["timeout"], 10)
-        req = opener.call_args[0][0]
-        self.assertEqual(req.full_url, telemetry.HOST)
-        self.assertIn("EmmetTracker/", req.headers["User-agent"])
-
-    def test_flush_handles_network_errors(self):
-        telemetry.queue.append({"t": "event"})
-        with patch.object(telemetry.urllib.request, "urlopen", side_effect=OSError("down")):
-            telemetry._flush_queue()  # must not raise
-        self.assertEqual(telemetry.queue, [])
-        telemetry.scheduled = False
-        telemetry._flush_queue()  # empty queue: nothing to do
-
-    def test_check_telemetry_existing_settings_does_nothing(self):
-        fake = MagicMock()
-        fake.get.side_effect = {"uid": "abc", "telemetry": False}.get
-        with (
-            patch.object(telemetry.sublime, "load_settings", return_value=fake),
-            patch.object(telemetry.sublime, "save_settings") as save,
-            patch.object(telemetry, "ask_for_telemetry") as ask,
-        ):
-            telemetry.check_telemetry()
-        save.assert_not_called()
-        ask.assert_not_called()
-        self.assertEqual(telemetry.queue, [])
-
-    def test_check_telemetry_first_run(self):
-        fake = MagicMock()
-        fake.get.side_effect = lambda k, d=None: None
-        with (
-            patch.object(telemetry.sublime, "load_settings", return_value=fake),
-            patch.object(telemetry.sublime, "save_settings") as save,
-            patch.object(telemetry, "ask_for_telemetry", return_value=False),
-            patch.object(telemetry.sublime, "set_timeout_async"),
-        ):
-            telemetry.check_telemetry()
-        save.assert_called_once_with("Emmet.sublime-settings")
-        fake.set.assert_any_call("telemetry", False)

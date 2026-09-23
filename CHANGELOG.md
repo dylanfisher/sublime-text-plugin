@@ -8,7 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The upstream
 history follows below.
 
 Command names, arguments, key bindings, palette and menu entries and settings keys
-are unchanged.
+are unchanged, except that the telemetry settings were removed (see Removed).
 
 ### Added
 - The py-emmet core (1.3.1, latest on PyPI and GitHub) is vendored in `emmet/`
@@ -16,7 +16,7 @@ are unchanged.
   Upstream installs it only when building the `.sublime-package`, so a git checkout
   failed to load (`No module named 'Emmet.emmet'`).
 - `.python-version` `3.14`: runs on Sublime Text 4's Python 3.14 plugin host.
-- UnitTesting suite in `tests/` (190 tests, 94% line coverage of `main.py` and `lib/`).
+- UnitTesting suite in `tests/` (185 tests, 94% line coverage of `main.py` and `lib/`).
 - Benchmarks in `tests/benchmarks/`, results in `PERFORMANCE.md`.
 - `pyproject.toml` (ruff lint/format, pyright), `.coveragerc`, a UnitTesting type stub
   in `typings/`, and a GitHub Actions workflow running ruff, pyright and the tests.
@@ -30,10 +30,14 @@ are unchanged.
   longer parses the whole document on every caret move. See `PERFORMANCE.md`.
 - Code modernized for Python 3.14: type hints, f-strings, no ST3 version checks,
   specific exceptions; dead code and `.pylintrc` removed.
-- Telemetry requests (off unless you opted in) time out after 10 s and failures are
-  logged; they run on Sublime's shared async thread.
 - Convert data:URL reports failures (missing file, unsaved view, too large, unreadable)
   in the status bar, and reads at most `max_data_url` + 1 bytes of a remote image.
+
+### Removed
+- Telemetry. It posted usage events to Google Universal Analytics, which Google has
+  shut down, and on a fresh install it sent events before asking for consent. The
+  first-run consent dialog is gone, and the `telemetry` and `uid` settings are no
+  longer read.
 
 ### Fixed
 - **Wrap with Abbreviation** run with a `wrap_abbreviation` argument (key binding or

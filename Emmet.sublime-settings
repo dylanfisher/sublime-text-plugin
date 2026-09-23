@@ -183,12 +183,5 @@
 	//      }
 	//  }
 	// }
-	"config": {},
-
-	// Unique ID editor instance, used for upcoming online Emmet config.
-	// Please do not edit
-	"uid": null,
-
-	// Enable anonymous event tracking, used to improve Emmet experience
-	"telemetry": null
+	"config": {}
 }

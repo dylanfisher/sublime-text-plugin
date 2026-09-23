@@ -80,7 +80,6 @@ class EmmetTestCase(ViewTestCase):
         "config",
         "wrap_size_preview",
         "marker_scope",
-        "telemetry",
     )
 
     def setUp(self) -> None:

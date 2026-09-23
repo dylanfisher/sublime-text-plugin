@@ -1,6 +1,5 @@
 import html
 import re
-from time import time
 from typing import Any
 
 import sublime
@@ -8,18 +7,12 @@ import sublime
 from . import emmet_sublime as emmet
 from . import syntax
 from .config import get_user_css
-from .telemetry import track_action
 from .utils import get_caret, go_to_pos
 
 previews_by_buffer: dict[int, tuple[int, bool]] = {}
 phantoms_by_buffer: dict[int, sublime.PhantomSet] = {}
 phantom_key = "emmet_tag_preview"
 max_preview_len = 100
-tracking: dict[str, float] = {
-    "last_event": 0,
-    # Delay between tracking events, in seconds
-    "delay": 5 * 60,
-}
 
 
 def show_tag_preview(view: sublime.View, pt: int, text: str, dest: int) -> None:
@@ -130,7 +123,6 @@ def handle_selection_change(view: sublime.View) -> None:
                 preview = f"{preview[0:max_preview_len]}..."
             show_tag_preview(view, pos, preview, ctx["open"].a)
             previews_by_buffer[buffer_id] = (pos, True)
-            track_preview()
             return
 
     hide_tag_preview(view)
@@ -157,14 +149,6 @@ def may_be_in_close_tag(view: sublime.View, caret: int) -> bool:
         return start > 0  # the tag could start before the window
     # A close tag has no `>` before its end; the caret may sit right after it.
     return chunk.startswith("/", lt + 1) and ">" not in chunk[lt : rel - 1]
-
-
-def track_preview() -> None:
-    last_event = tracking["last_event"]
-    now = time()
-    if now > last_event + tracking["delay"]:
-        track_action("Display Tag Preview")
-        tracking["last_event"] = now
 
 
 def create_tag_preview(ctx: Any) -> str:

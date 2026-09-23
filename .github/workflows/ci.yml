@@ -26,12 +26,6 @@ jobs:
         with:
           package-name: Emmet
           sublime-text-version: 4
-      # plugin_loaded() asks for telemetry consent in a modal dialog when these two
-      # settings are unset, which would block a headless test run.
-      - name: Pre-answer the telemetry prompt
-        run: |
-          mkdir -p "$SUBLIME_TEXT_PACKAGES/User"
-          echo '{"telemetry": false, "uid": "ci"}' > "$SUBLIME_TEXT_PACKAGES/User/Emmet.sublime-settings"
       - uses: SublimeText/UnitTesting/actions/run-tests@v1
         with:
           package-name: Emmet

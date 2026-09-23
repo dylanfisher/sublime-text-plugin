@@ -28,7 +28,6 @@ from .lib import wrap_with_abbreviation as wrap  # noqa: E402
 from .lib.config import get_settings  # noqa: E402
 from .lib.remove_tag import remove_tag  # noqa: E402
 from .lib.split_join_tag import split_join_tag  # noqa: E402
-from .lib.telemetry import check_telemetry, track_action  # noqa: E402
 from .lib.update_image_size import update_image_size  # noqa: E402
 from .lib.utils import (  # noqa: E402
     get_caret,
@@ -42,10 +41,6 @@ last_wrap_abbreviation: str | None = None
 
 def plugin_unloaded() -> None:
     abbreviation.plugin_unloaded()
-
-
-def plugin_loaded() -> None:
-    check_telemetry()
 
 
 def is_widget(view: sublime.View) -> bool:
@@ -75,7 +70,6 @@ class EmmetExpandAbbreviation(sublime_plugin.TextCommand):
 
         if trk and trk.region.contains(caret):
             abbreviation.expand_tracker(self.view, edit, trk)
-            track_action("Expand Abbreviation", trk.config.syntax)
         abbreviation.stop_tracking(self.view, {"force": not tab})
 
     def multiple_caret(self, edit: sublime.Edit) -> None:
@@ -107,10 +101,8 @@ class EmmetExpandAbbreviation(sublime_plugin.TextCommand):
         s.clear()
         s.add_all(sels)
 
-        if expanded:
-            if cur_tracker:
-                abbreviation.store_tracker(self.view, cur_tracker)
-            track_action("Expand Multiple Abbreviations", expanded)
+        if expanded and cur_tracker:
+            abbreviation.store_tracker(self.view, cur_tracker)
 
 
 class EmmetEnterAbbreviation(sublime_plugin.TextCommand):
@@ -130,13 +122,11 @@ class EmmetEnterAbbreviation(sublime_plugin.TextCommand):
             sel = self.view.sel()
             sel.clear()
             sel.add(sublime.Region(primary_sel.end(), primary_sel.end()))
-            track_action("Enter Abbreviation", trk.config.syntax)
 
 
 class EmmetClearAbbreviationMarker(sublime_plugin.TextCommand):
     def run(self, edit: sublime.Edit) -> None:
         abbreviation.stop_tracking(self.view, {"force": True, "edit": edit})
-        track_action("Clear Abbreviation")
 
 
 class EmmetCaptureAbbreviation(sublime_plugin.TextCommand):
@@ -168,8 +158,6 @@ class EmmetBalance(sublime_plugin.TextCommand):
         selection = self.view.sel()
         selection.clear()
         selection.add_all(regions)
-
-        track_action("Balance", direction)
 
 
 # NB: use `Emmet` prefix to distinguish default `toggle_comment` action
@@ -205,9 +193,6 @@ class EmmetToggleComment(sublime_plugin.TextCommand):
             else:
                 # Comment selection
                 comment.add_comment(view, edit, s, comment.html_comment)
-
-        pos = get_caret(view)
-        track_action("Toggle Comment", syntax.from_pos(view, pos))
 
 
 class EmmetConvertDataUrl(sublime_plugin.TextCommand):
@@ -248,8 +233,6 @@ class EmmetEvaluateMath(sublime_plugin.TextCommand):
         for region, snippet in reversed(replacements):
             self.view.replace(edit, region, snippet)
 
-        track_action("Evaluate Math")
-
 
 class EmmetGoToEditPoint(sublime_plugin.TextCommand):
     def run(self, edit: sublime.Edit, previous: bool = False) -> None:
@@ -265,8 +248,6 @@ class EmmetGoToEditPoint(sublime_plugin.TextCommand):
             sel.clear()
             sel.add_all(next_selections)
             self.view.show(next_selections[0])
-
-        track_action("Go to Edit Point", "previous" if previous else "next")
 
 
 class EmmetGoToTagPair(sublime_plugin.TextCommand):
@@ -284,8 +265,6 @@ class EmmetGoToTagPair(sublime_plugin.TextCommand):
                 pos = close_tag.begin() if open_tag.contains(caret) else open_tag.begin()
                 tag_pair.go_to_pos(self.view, pos)
 
-        track_action("Go to Tag Pair")
-
 
 class EmmetHideTagPreview(sublime_plugin.TextCommand):
     def run(self, edit: sublime.Edit) -> None:
@@ -295,13 +274,11 @@ class EmmetHideTagPreview(sublime_plugin.TextCommand):
 class EmmetIncrementNumber(sublime_plugin.TextCommand):
     def run(self, edit: sublime.Edit, delta: float = 1) -> None:
         inc_dec.update(self.view, edit, delta)
-        track_action("Increment number", "delta", str(delta))
 
 
 class EmmetDecrementNumber(sublime_plugin.TextCommand):
     def run(self, edit: sublime.Edit, delta: float = 1) -> None:
         inc_dec.update(self.view, edit, -delta)
-        track_action("Increment number", "delta", str(delta))
 
 
 class EmmetRemoveTag(sublime_plugin.TextCommand):
@@ -312,26 +289,20 @@ class EmmetRemoveTag(sublime_plugin.TextCommand):
             if tag:
                 remove_tag(view, edit, tag)
 
-        track_action("Remove Tag")
-
 
 class EmmetSelectItem(sublime_plugin.TextCommand):
     def run(self, edit: sublime.Edit, previous: bool = False) -> None:
         select_item.run_action(self.view, previous)
-        track_action("Select Item", "previous" if previous else "next")
 
 
 class EmmetSplitJoinTag(sublime_plugin.TextCommand):
     def run(self, edit: sublime.Edit) -> None:
         split_join_tag(self.view, edit)
-        track_action("Split/Join Tag")
 
 
 class EmmetUpdateImageSize(sublime_plugin.TextCommand):
     def run(self, edit: sublime.Edit) -> None:
         update_image_size(self.view, edit)
-        caret = get_caret(self.view)
-        track_action("Update Image Size", syntax.from_pos(self.view, caret))
 
 
 class EmmetWrapWithAbbreviation(sublime_plugin.TextCommand):
@@ -359,8 +330,6 @@ class EmmetWrapWithAbbreviation(sublime_plugin.TextCommand):
                 payload.append((region, snippet))
 
             multicursor_replace_with_snippet(self.view, edit, payload)
-
-            track_action("Wrap With Abbreviation")
 
     def input(self, args: dict[str, Any]) -> sublime_plugin.CommandInputHandler | None:
         abbreviation.stop_tracking(self.view)
@@ -447,8 +416,6 @@ class EmmetRenameTag(sublime_plugin.TextCommand):
 
         if sel_cleared:
             self.view.show(selection)
-
-        track_action("Rename Tag")
 
 
 class EmmetInsertAttribute(sublime_plugin.TextCommand):
