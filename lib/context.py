@@ -100,22 +100,23 @@ def get_html_context(editor: sublime.View, pos: int) -> dict[str, Any] | None:
     # use selector to get tag name and adjacent closing punctuation to distinct
     # regions and properly build document tree
     is_html = editor.match_selector(pos, "text.html")
-    tmp = sublime.Region(0, 0)
-    pool = []
-    stack = []
+    pool: list[dict[str, Any]] = []
+    stack: list[dict[str, Any]] = []
     regions = editor.find_by_selector("entity.name.tag, punctuation.definition.tag.end")
-    pending = None
+    pending: sublime.Region | None = None
+    # One IPC call for the whole text instead of one `substr()` per region: tag
+    # regions are sliced locally (Sublime points are str indices).
+    text = editor.substr(sublime.Region(0, editor.size()))
+    size = len(text)
 
     for r in regions:
-        val = editor.substr(r)
+        val = text[r.a : r.b]
         if val in (">", "/>"):
             # It’s a closing punctuator for open tag
             # NB: we know it’s open tag (with attributes) for sure, otherwise punctuation
             # will be a part of original region
             if pending is not None:
-                tmp.a = pending.a + 1
-                tmp.b = pending.b
-                tag_name = editor.substr(tmp)
+                tag_name = text[pending.a + 1 : pending.b]
                 pending.b = r.b
 
                 is_self_close = val == "/>" or (is_html and tag_name in self_close)
@@ -128,7 +129,7 @@ def get_html_context(editor: sublime.View, pos: int) -> dict[str, Any] | None:
         else:
             # It’s a tag name, get full tag beginning location
             r.a -= 1
-            is_close = editor.substr(r.a) == "/"
+            is_close = 0 <= r.a < size and text[r.a] == "/"
 
             if is_close:
                 r.a -= 1
@@ -197,32 +198,34 @@ def fast_get_css_context(editor: sublime.View, pos: int) -> dict[str, Any] | Non
 
 
 def get_matching_section(view: sublime.View, pos: int) -> sublime.Region | None:
-    for r in get_section_regions(view):
-        if r.contains(pos):
-            return r
+    """First selector/property-list region (leading whitespace trimmed) that
+    contains `pos`.
+
+    A trimmed region is a sub-range of the raw one, so raw regions that don't
+    contain `pos` are skipped before trimming: only candidates cost `substr()`
+    calls, not every selector and property list in the file."""
+    max_size = view.size()
+    for raw in view.find_by_selector("meta.selector, meta.property-list"):
+        if raw.begin() <= pos <= raw.end():
+            r = _trim_section(view, raw, max_size)
+            if r.contains(pos):
+                return r
     return None
 
 
-def get_section_regions(view: sublime.View) -> list[sublime.Region]:
-    result = []
-    regions = view.find_by_selector("meta.selector, meta.property-list")
-    max_size = view.size()
+def _trim_section(view: sublime.View, r: sublime.Region, max_size: int) -> sublime.Region:
+    start = r.begin()
+    end = r.end()
 
-    for r in regions:
-        start = r.begin()
-        end = r.end()
+    # a region may start with whitespace
+    while start < end and view.substr(start).isspace():
+        start += 1
 
-        # a region may start with whitespace
-        while start < end and view.substr(start).isspace():
-            start += 1
+    # Find terminating
+    while end > max_size and view.substr(end) != "}":
+        end += 1
 
-        # Find terminating
-        while end > max_size and view.substr(end) != "}":
-            end += 1
-
-        result.append(sublime.Region(start, end))
-
-    return result
+    return sublime.Region(start, end)
 
 
 def search_css_context(content: str, pos: int) -> dict[str, Any]:

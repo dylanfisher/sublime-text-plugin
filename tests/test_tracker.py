@@ -357,3 +357,17 @@ class TestTagPreview(EmmetTestCase):
 
     def test_other_query_context(self):
         self.assertIsNone(self.preview.on_query_context(self.view, "other", 0, True, False))
+
+    def test_close_tag_precheck_never_skips_a_preview(self):
+        # may_be_in_close_tag() must be a necessary condition for the full match:
+        # wherever the matched close tag contains the caret, it returns True.
+        from ..lib import emmet_sublime
+
+        doc = '<div a="1">\n <p>x</p>\n <br/>\n <span >y</span >\n</div>\n<ul><li>z</li></ul>'
+        self.set_text(doc)
+        for pt in range(self.view.size() + 1):
+            ctx = emmet_sublime.get_tag_context(self.view, pt)
+            if ctx and "close" in ctx and ctx["close"].contains(pt):
+                self.assertTrue(go_to_tag_pair.may_be_in_close_tag(self.view, pt), pt)
+        self.assertFalse(go_to_tag_pair.may_be_in_close_tag(self.view, 13))
+        self.assertTrue(go_to_tag_pair.may_be_in_close_tag(self.view, doc.index("</p>")))

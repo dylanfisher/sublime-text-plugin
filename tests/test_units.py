@@ -129,6 +129,17 @@ class TestCSSContext(EmmetTestCase):
         self.set_text("@media (m) {\n}")
         self.assertIsNotNone(context.get_activation_context(self.view, 9))
 
+    def test_matching_section_equals_full_scan(self):
+        self.set_text("a {\n  color: red;\n}\n  b, c { margin: 0 }\n@media (x) { d { e: f } }\n")
+        size = self.view.size()
+        trimmed = [
+            context._trim_section(self.view, r, size)
+            for r in self.view.find_by_selector("meta.selector, meta.property-list")
+        ]
+        for pt in range(size + 1):
+            expected = next((r for r in trimmed if r.contains(pt)), None)
+            self.assertEqual(context.get_matching_section(self.view, pt), expected, pt)
+
     def test_scss_uses_text_scanner(self):
         self.set_text("a {\n  m\n}")
         with patch.object(syntax, "doc_syntax", return_value="scss"):

@@ -103,7 +103,11 @@ def handle_selection_change(view: sublime.View) -> None:
     syntax_name = syntax.from_pos(view, caret)
     buffer_id = view.buffer_id()
 
-    if syntax.is_html(syntax_name) and not syntax.is_jsx(syntax_name):
+    if (
+        syntax.is_html(syntax_name)
+        and not syntax.is_jsx(syntax_name)
+        and may_be_in_close_tag(view, caret)
+    ):
         ctx = emmet.get_tag_context(view, caret, syntax.is_xml(syntax_name))
         if (
             ctx
@@ -131,6 +135,28 @@ def handle_selection_change(view: sublime.View) -> None:
 
     hide_tag_preview(view)
     previews_by_buffer.pop(buffer_id, None)
+
+
+CLOSE_TAG_LOOKBEHIND = 1024
+
+
+def may_be_in_close_tag(view: sublime.View, caret: int) -> bool:
+    """
+    Cheap necessary condition for the preview: the caret is inside or at either
+    edge of a closing tag `</name>`. Matching the tag means parsing the whole
+    document, so skipping it for every other caret position saves that work on
+    each caret move. When unsure, returns True (the full match decides).
+    """
+    start = max(0, caret - CLOSE_TAG_LOOKBEHIND)
+    chunk = view.substr(sublime.Region(start, caret + 2))
+    rel = caret - start
+    if chunk.startswith("</", rel):
+        return True  # caret right before `</`
+    lt = chunk.rfind("<", 0, rel)
+    if lt == -1:
+        return start > 0  # the tag could start before the window
+    # A close tag has no `>` before its end; the caret may sit right after it.
+    return chunk.startswith("/", lt + 1) and ">" not in chunk[lt : rel - 1]
 
 
 def track_preview() -> None:
