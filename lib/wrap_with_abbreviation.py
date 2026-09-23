@@ -1,5 +1,5 @@
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,11 +36,13 @@ class WrapAbbreviationInputHandler(sublime_plugin.TextInputHandler):
         wrap_entries: list[WrapEntry],
         initial_abbr: str | None = None,
         preview: bool = False,
+        on_cancel: Callable[[], None] | None = None,
     ) -> None:
         self.view = view
         self.wrap_entries = wrap_entries
         self.instant_preview = preview
         self.initial_abbr = initial_abbr
+        self.on_cancel = on_cancel
 
     def placeholder(self) -> str:
         return "Enter abbreviation"
@@ -62,6 +64,8 @@ class WrapAbbreviationInputHandler(sublime_plugin.TextInputHandler):
 
     def cancel(self) -> None:
         undo_preview(self.view)
+        if self.on_cancel:
+            self.on_cancel()
 
     def confirm(self, text: str, event: Any = None) -> None:
         undo_preview(self.view)

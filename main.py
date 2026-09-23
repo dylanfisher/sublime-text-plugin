@@ -335,16 +335,26 @@ class EmmetUpdateImageSize(sublime_plugin.TextCommand):
 
 
 class EmmetWrapWithAbbreviation(sublime_plugin.TextCommand):
-    wrap_entries: list[wrap.WrapEntry]
+    # Set by input() (palette flow) and used once by the following run().
+    wrap_entries: list[wrap.WrapEntry] | None = None
 
     def run(self, edit: sublime.Edit, wrap_abbreviation: str) -> None:
         global last_wrap_abbreviation  # remembered across invocations
+
+        # Called with `wrap_abbreviation` already given (a key binding or another
+        # plugin), Sublime skips input(). Upstream then raised AttributeError, or
+        # wrapped the regions of an earlier palette run.
+        entries = self.wrap_entries
+        self.wrap_entries = None
+        if entries is None:
+            abbreviation.stop_tracking(self.view)
+            entries, _ = self.collect_entries()
 
         if wrap_abbreviation:
             payload = []
             last_wrap_abbreviation = wrap_abbreviation
 
-            for region, config in self.wrap_entries:
+            for region, config in entries:
                 snippet = emmet_sublime.expand(wrap_abbreviation, config)
                 payload.append((region, snippet))
 
@@ -353,12 +363,29 @@ class EmmetWrapWithAbbreviation(sublime_plugin.TextCommand):
             track_action("Wrap With Abbreviation")
 
     def input(self, args: dict[str, Any]) -> sublime_plugin.CommandInputHandler | None:
+        abbreviation.stop_tracking(self.view)
+        self.wrap_entries, wrap_size = self.collect_entries()
+        preview = wrap_size < syntax.typed_setting("wrap_size_preview", -1, int, float)
+
+        return wrap.WrapAbbreviationInputHandler(
+            self.view,
+            self.wrap_entries,
+            last_wrap_abbreviation,
+            preview,
+            on_cancel=self.forget_entries,
+        )
+
+    def forget_entries(self) -> None:
+        "The palette input was cancelled: a later run() must not reuse these regions"
+        self.wrap_entries = None
+
+    def collect_entries(self) -> tuple[list[wrap.WrapEntry], int]:
+        "Regions to wrap (overlapping ones merged) and their total size"
         view = self.view
-        abbreviation.stop_tracking(view)
         wrap_entries: list[wrap.WrapEntry] = []
         wrap_size = 0
 
-        for sel in list(self.view.sel()):
+        for sel in list(view.sel()):
             config = wrap.get_wrap_config(view, sel.begin())
             region = wrap.get_wrap_region(view, sel, config)
             lines = wrap.get_content(view, region, True)
@@ -368,21 +395,17 @@ class EmmetWrapWithAbbreviation(sublime_plugin.TextCommand):
             wrap_entries.append(wrap.WrapEntry(region, config))
 
         # Check for region overlapping
-        self.wrap_entries = []
+        merged: list[wrap.WrapEntry] = []
         wrap_entries.sort(key=lambda item: item.region.begin())
 
         for entry in wrap_entries:
-            prev = self.wrap_entries[-1] if self.wrap_entries else None
+            prev = merged[-1] if merged else None
             if prev and prev.region.intersects(entry.region):
                 prev.region = prev.region.cover(entry.region)
             else:
-                self.wrap_entries.append(entry)
+                merged.append(entry)
 
-        preview = wrap_size < get_settings("wrap_size_preview", -1)
-
-        return wrap.WrapAbbreviationInputHandler(
-            view, self.wrap_entries, last_wrap_abbreviation, preview
-        )
+        return merged, wrap_size
 
 
 class EmmetWrapWithAbbreviationPreview(sublime_plugin.TextCommand):

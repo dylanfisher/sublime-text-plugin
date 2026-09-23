@@ -784,7 +784,8 @@ def is_valid_candidate(abbr: str, config: Config) -> bool:
     # * upper-cased (JSX, Svelte components)
     # * known HTML tags
     # * known Emmet snippets
-    if config.type == "markup" and config.syntax in get_settings("known_snippets_only", []):
+    known_only = syntax.typed_setting("known_snippets_only", [], list)
+    if config.type == "markup" and config.syntax in known_only:
         return bool(
             "-" in abbr
             or (abbr and abbr[0].isupper())

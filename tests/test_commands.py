@@ -3,8 +3,7 @@
 import base64
 import os
 import tempfile
-import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import sublime
 
@@ -146,47 +145,40 @@ class TestExpandPlainText(EmmetTestCase):
 
 
 class TestWrapWithAbbreviation(EmmetTestCase):
-    @unittest.expectedFailure  # run() without input() first: wrap_entries is unset
     def test_wrap_selection(self):
         self.set_text("hello")
         self.select((0, 5))
         self.view.run_command("emmet_wrap_with_abbreviation", {"wrap_abbreviation": "div.w"})
         self.assertEqual(self.text(), '<div class="w">hello</div>')
 
-    @unittest.expectedFailure  # run() without input() first: wrap_entries is unset
     def test_wrap_lines_with_repeater(self):
         self.set_text("one\ntwo")
         self.select((0, 7))
         self.view.run_command("emmet_wrap_with_abbreviation", {"wrap_abbreviation": "ul>li*"})
         self.assertEqual(self.text(), "<ul>\n\t<li>one</li>\n\t<li>two</li>\n</ul>")
 
-    @unittest.expectedFailure  # run() without input() first: wrap_entries is unset
     def test_wrap_empty_selection_wraps_tag_contents(self):
         self.set_text("<p>te|xt</p>")
         self.view.run_command("emmet_wrap_with_abbreviation", {"wrap_abbreviation": "b"})
         self.assertEqual(self.text(), "<p><b>text</b></p>")
 
-    @unittest.expectedFailure  # run() without input() first: wrap_entries is unset
     def test_wrap_caret_in_open_tag_wraps_tag(self):
         self.set_text("<p|>text</p>")
         self.view.run_command("emmet_wrap_with_abbreviation", {"wrap_abbreviation": "div"})
-        self.assertEqual(self.text(), "<div><p>text</p></div>")
+        self.assertEqual(self.text(), "<div>\n\t<p>text</p>\n</div>")
 
-    @unittest.expectedFailure  # run() without input() first: wrap_entries is unset
     def test_wrap_multiple_cursors(self):
         self.set_text("a b")
         self.select((0, 1), (2, 3))
         self.view.run_command("emmet_wrap_with_abbreviation", {"wrap_abbreviation": "i"})
         self.assertEqual(self.text(), "<i>a</i> <i>b</i>")
 
-    @unittest.expectedFailure  # run() without input() first: wrap_entries is unset
     def test_wrap_unicode(self):
         self.set_text("✓ 日本")
         self.select((0, 4))
         self.view.run_command("emmet_wrap_with_abbreviation", {"wrap_abbreviation": "em"})
         self.assertEqual(self.text(), "<em>✓ 日本</em>")
 
-    @unittest.expectedFailure  # run() without input() first: wrap_entries is unset
     def test_wrap_escapes_dollar(self):
         self.set_text("$var")
         self.select((0, 4))
@@ -207,8 +199,30 @@ class TestWrapWithAbbreviation(EmmetTestCase):
         self.set_text("<p>a|b|c</p>")
         cmd = main.EmmetWrapWithAbbreviation(self.view)
         cmd.input({})
+        assert cmd.wrap_entries is not None
         self.assertEqual(len(cmd.wrap_entries), 1)
         self.assertEqual(cmd.wrap_entries[0].region, sublime.Region(3, 6))
+
+    def test_cancelled_palette_input_is_not_reused(self):
+        from .. import main
+
+        self.set_text("<p>a|b</p>\n<i>x</i>")
+        cmd = main.EmmetWrapWithAbbreviation(self.view)
+        handler = cmd.input({})
+        assert isinstance(handler, wrap_with_abbreviation.WrapAbbreviationInputHandler)
+        handler.cancel()
+        self.assertIsNone(cmd.wrap_entries)
+        self.select((13, 14))  # the `x` in <i>
+        self.view.run_command("emmet_wrap_with_abbreviation", {"wrap_abbreviation": "b"})
+        self.assertEqual(self.text(), "<p>ab</p>\n<i><b>x</b></i>")
+
+    def test_wrap_twice_with_arguments(self):
+        self.set_text("a")
+        self.select((0, 1))
+        self.view.run_command("emmet_wrap_with_abbreviation", {"wrap_abbreviation": "i"})
+        self.select((0, 8))
+        self.view.run_command("emmet_wrap_with_abbreviation", {"wrap_abbreviation": "b"})
+        self.assertEqual(self.text(), "<b><i>a</i></b>")
 
     def test_input_handler_validate_and_preview(self):
         self.set_text("<p>text</p>")
@@ -524,7 +538,7 @@ class TestUpdateImageSize(FileCommandTestCase):
         self.assertIsNone(get_size(b"nothing"))
 
     def test_dpi_suffix(self):
-        self.assertEqual(update_image_size.get_dpi("a/pic@2x.png"), 1)
+        self.assertEqual(update_image_size.get_dpi("a/pic@2x.png"), 2)
         self.assertEqual(update_image_size.get_dpi("a/pic@1.5x.png"), 1.5)
         self.assertEqual(update_image_size.get_dpi("a/pic.png"), 1)
 
@@ -549,6 +563,70 @@ class TestConvertDataUrl(FileCommandTestCase):
         with open(os.path.join(self.dir, "out", "new.png"), "rb") as f:
             self.assertEqual(f.read(), PNG_1x1)
         self.assertEqual(self.text(), '<img src="out/new.png">')
+
+    def test_to_data_url_uses_standard_base64(self):
+        data = bytes(range(256)) * 4  # encodes to text with `+` and `/`
+        with open(os.path.join(self.dir, "b.png"), "wb") as f:
+            f.write(data)
+        self.set_text('<img src="b.png"|>')
+        self.cmd("emmet_convert_data_url")
+        encoded = self.text()[len('<img src="data:image/png;base64,') : -2]
+        self.assertEqual(base64.b64decode(encoded, validate=True), data)
+
+    def test_to_data_url_respects_max_size(self):
+        self.settings.set("max_data_url", 10)
+        self.set_text('<img src="pic.png"|>')
+        with patch.object(sublime, "status_message") as status:
+            self.cmd("emmet_convert_data_url")
+        self.assertEqual(self.text(), '<img src="pic.png">')
+        self.assertIn("max_data_url", status.call_args[0][0])
+
+    def test_to_data_url_missing_file_and_unsaved_view(self):
+        self.set_text('<img src="nope.png"|>')
+        with patch.object(sublime, "status_message") as status:
+            self.cmd("emmet_convert_data_url")
+            self.assertIn("nope.png", status.call_args[0][0])
+            with patch.object(type(self.view), "file_name", lambda _v: None):
+                self.set_text('<img src="pic.png"|>')
+                self.cmd("emmet_convert_data_url")
+                self.assertIn("save the file first", status.call_args[0][0])
+
+    def test_from_data_url_asks_before_overwriting(self):
+        data = base64.b64encode(PNG_1x1).decode()
+        target = os.path.join(self.dir, "pic.png")
+        with open(target, "wb") as f:
+            f.write(b"keep")
+        self.set_text(f'<img src="data:image/png;base64,{data}">')
+        region = sublime.Region(10, self.view.size() - 2)
+        with patch.object(sublime, "ok_cancel_dialog", return_value=False) as ask:
+            convert_data_url.convert_from_data_url(self.view, region, "pic.png")
+        ask.assert_called_once()
+        with open(target, "rb") as f:
+            self.assertEqual(f.read(), b"keep")
+        with patch.object(sublime, "ok_cancel_dialog", return_value=True):
+            convert_data_url.convert_from_data_url(self.view, region, "pic.png")
+        with open(target, "rb") as f:
+            self.assertEqual(f.read(), PNG_1x1)
+        self.assertEqual(self.text(), '<img src="pic.png">')
+
+    def test_from_data_url_bad_input(self):
+        self.set_text('<img src="data:image/png;base64,@@@">')
+        region = sublime.Region(10, self.view.size() - 2)
+        with patch.object(sublime, "status_message") as status:
+            convert_data_url.convert_from_data_url(self.view, region, "x.png")
+            self.assertIn("invalid base64", status.call_args[0][0])
+            convert_data_url.convert_from_data_url(self.view, region, "  ")
+            with patch.object(type(self.view), "file_name", lambda _v: None):
+                convert_data_url.convert_from_data_url(self.view, region, "x.png")
+                self.assertIn("save the file first", status.call_args[0][0])
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "x.png")))
+
+    def test_from_data_url_opens_input_panel(self):
+        self.set_text('<img src="data:image/png;base64,AAAA"|>')
+        window = MagicMock()
+        with patch.object(type(self.view), "window", lambda _v: window):
+            self.cmd("emmet_convert_data_url")
+        self.assertEqual(window.show_input_panel.call_args[0][1], "image.png")
 
     def test_get_ext(self):
         self.assertEqual(convert_data_url.get_ext("data:image/svg+xml;base64,x"), ".svg")

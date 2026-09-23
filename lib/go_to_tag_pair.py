@@ -86,7 +86,7 @@ def phantom_content(content: str, dest: int) -> str:
 def allow_preview(view: sublime.View) -> bool:
     "Check if tag preview is allowed in given view"
     if not view.settings().get("is_widget") and emmet.get_settings("tag_preview"):
-        size = emmet.get_settings("tag_preview_size_limit", 0)
+        size = syntax.typed_setting("tag_preview_size_limit", 0, int, float)
         return not size or view.size() <= size
     return False
 

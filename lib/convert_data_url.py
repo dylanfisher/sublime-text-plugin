@@ -9,7 +9,9 @@ import sublime
 from ..emmet.action_utils import get_open_tag
 from ..emmet.html_matcher import AttributeToken
 from . import emmet_sublime as emmet
-from . import utils
+from . import syntax, utils
+
+URLSAFE_TO_STANDARD = str.maketrans("-_", "+/")
 
 mime_types = {
     ".gif": "image/gif",
@@ -69,7 +71,7 @@ def toggle_url(view: sublime.View, edit: sublime.Edit, region: sublime.Region) -
 
 
 def convert_to_data_url(view: sublime.View, edit: sublime.Edit, region: sublime.Region) -> None:
-    max_size = emmet.get_settings("max_data_url", 0)
+    max_size = syntax.typed_setting("max_data_url", 0, int, float)
     src = view.substr(region)
     abs_file = None
     file_name = view.file_name()
@@ -79,40 +81,86 @@ def convert_to_data_url(view: sublime.View, edit: sublime.Edit, region: sublime.
     elif file_name:
         abs_file = utils.locate_file(file_name, src)
         if abs_file and max_size and os.path.getsize(abs_file) > max_size:
-            print(
-                f"Size of {abs_file} file is too large. "
-                'Check "emmet_max_data_url" setting to increase this limit'
+            status(
+                f"{abs_file} is larger than {max_size} bytes; "
+                'increase the "max_data_url" setting to convert it'
             )
             return
+    else:
+        status("save the file first: image paths are resolved relative to it")
+        return
 
-    if abs_file:
-        data = utils.read_file(abs_file)
-        if data and (not max_size or len(data) <= max_size):
-            ext = os.path.splitext(abs_file)[1]
-            if ext in mime_types:
-                encoded = base64.urlsafe_b64encode(data).decode("utf8")
-                new_src = f"data:{mime_types[ext]};base64,{encoded}"
-                view.replace(edit, region, new_src)
+    if not abs_file:
+        status(f"can't find {src}")
+        return
+
+    try:
+        # Read one byte past the limit so an oversized remote file is detected
+        # without downloading all of it.
+        data = utils.read_file(abs_file, int(max_size) + 1 if max_size else -1)
+    except (OSError, ValueError) as err:  # URLError/HTTPError/timeouts are OSErrors
+        status(f"can't read {abs_file}: {err}")
+        return
+
+    if data and (not max_size or len(data) <= max_size):
+        ext = os.path.splitext(abs_file)[1]
+        if ext in mime_types:
+            # Standard base64 (RFC 2397 data: URLs); upstream used the URL-safe
+            # alphabet (`-`/`_`), which browsers reject in data: URLs.
+            encoded = base64.b64encode(data).decode("ascii")
+            new_src = f"data:{mime_types[ext]};base64,{encoded}"
+            view.replace(edit, region, new_src)
 
 
 def convert_from_data_url(view: sublime.View, region: sublime.Region, dest: str) -> None:
     src = view.substr(region)
     m = re.match(r"^data\:.+?;base64,(.+)", src)
-    if m:
-        base_dir = os.path.dirname(view.file_name() or "")
-        abs_dest = utils.create_path(base_dir, dest)
-        file_url = os.path.relpath(abs_dest, base_dir).replace("\\", "/")
+    if not m:
+        return
 
-        dest_dir = os.path.dirname(abs_dest)
-        if not os.path.exists(dest_dir):
-            os.makedirs(dest_dir)
+    file_name = view.file_name()
+    if not file_name:
+        status("save the file first: the image is written next to it")
+        return
+    if not dest.strip():
+        return
 
+    base_dir = os.path.dirname(file_name)
+    abs_dest = utils.create_path(base_dir, dest)
+    file_url = os.path.relpath(abs_dest, base_dir).replace("\\", "/")
+
+    # Accept both base64 alphabets (upstream wrote URL-safe data), ignore
+    # whitespace, but reject anything else instead of silently dropping it.
+    payload = re.sub(r"\s+", "", m.group(1)).translate(URLSAFE_TO_STANDARD)
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except ValueError as err:  # binascii.Error
+        status(f"invalid base64 data: {err}")
+        return
+
+    if os.path.exists(abs_dest) and not sublime.ok_cancel_dialog(
+        f"{abs_dest} already exists.\n\nReplace it with the image from the data: URL?",
+        "Replace",
+    ):
+        return
+
+    try:
+        os.makedirs(os.path.dirname(abs_dest), exist_ok=True)
         with open(abs_dest, "wb") as fd:
-            fd.write(base64.urlsafe_b64decode(m.group(1)))
+            fd.write(data)
+    except OSError as err:
+        status(f"can't write {abs_dest}: {err}")
+        return
 
-        view.run_command(
-            "convert_data_url_replace", {"region": [region.begin(), region.end()], "text": file_url}
-        )
+    view.run_command(
+        "convert_data_url_replace", {"region": [region.begin(), region.end()], "text": file_url}
+    )
+
+
+def status(message: str) -> None:
+    "Report a failure of this command in the status bar and the console"
+    print(f"Emmet: Convert data:URL: {message}")
+    sublime.status_message(f"Emmet: {message}")
 
 
 def attr_value_region(attr: AttributeToken) -> sublime.Region | None:

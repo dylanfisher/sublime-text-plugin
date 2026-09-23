@@ -69,6 +69,35 @@ class TestSyntax(EmmetTestCase):
         self.assertTrue(syntax.in_activation_scope(self.view, 6))
 
 
+class TestSettingTypes(EmmetTestCase):
+    def test_wrong_types_fall_back_to_defaults(self):
+        syntax._type_warned.clear()
+        self.settings.set("known_snippets_only", "html")
+        self.settings.set("tag_preview_size_limit", "big")
+        self.settings.set("abbreviation_scopes", ["text.html", 5])
+        self.settings.set("config", ["x"])
+        with patch.object(syntax, "print", create=True) as out:
+            self.assertEqual(syntax.typed_setting("known_snippets_only", [], list), [])
+            self.assertEqual(syntax.typed_setting("tag_preview_size_limit", 0, int, float), 0)
+            self.assertEqual(syntax.selector_list("abbreviation_scopes"), ["text.html"])
+            self.assertEqual(config.global_config(), {})
+            syntax.typed_setting("known_snippets_only", [], list)  # warned once only
+        self.assertEqual(out.call_count, 3)
+        self.assertIn('"known_snippets_only"', out.call_args_list[0][0][0])
+
+    def test_bool_is_not_a_number(self):
+        self.settings.set("wrap_size_preview", True)
+        self.assertEqual(syntax.typed_setting("wrap_size_preview", -1, int, float), -1)
+
+    def test_commands_survive_bad_settings(self):
+        self.settings.set("known_snippets_only", 1)
+        self.settings.set("config", "nope")
+        self.settings.set("abbreviation_scopes", "text.html")
+        self.set_text("ul>li|")
+        self.cmd("emmet_expand_abbreviation")
+        self.assertEqual(self.text(), "<ul>\n\t<li></li>\n</ul>")
+
+
 class TestConfig(EmmetTestCase):
     def test_fields(self):
         self.assertEqual(config.field(1, "x"), "${1:x}")
@@ -403,6 +432,10 @@ class TestImageSize(EmmetTestCase):
         )
         self.assertEqual(get(jpeg), (34, 12))
         self.assertEqual(get(b'<svg height="7">'), (0, 7))
+        # Truncated/malformed headers are "unknown", not an exception.
+        self.assertIsNone(get(b"\377\330\001"))  # upstream: TypeError from ord(b"")
+        self.assertIsNone(get(b'<svg width="1"'))
+        self.assertIsNone(get(b"\211PNG\r\n\032\n\0\0"))
 
     def test_css_patch_existing_size(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -473,6 +506,7 @@ class TestTelemetry(EmmetTestCase):
         with patch.object(telemetry.urllib.request, "urlopen", opener):
             telemetry._flush_queue()
         self.assertEqual(telemetry.queue, [])
+        self.assertEqual(opener.call_args.kwargs["timeout"], 10)
         req = opener.call_args[0][0]
         self.assertEqual(req.full_url, telemetry.HOST)
         self.assertIn("EmmetTracker/", req.headers["User-agent"])

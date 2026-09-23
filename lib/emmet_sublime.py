@@ -13,7 +13,7 @@ from ..emmet import math_expression as _math
 from ..emmet.action_utils import CSSSection, SelectItemModel
 from ..emmet.extract_abbreviation import ExtractedAbbreviation
 from . import syntax
-from .config import get_settings
+from .config import get_settings, global_config
 from .utils import to_region
 
 # The vendored py-emmet annotations are loose (e.g. `config: dict` where a Config is
@@ -52,7 +52,7 @@ def escape_text(text: str, **kwargs: Any) -> str:
 
 
 def expand(abbr: str, config: Config | dict[str, Any]) -> str:
-    return expand_abbreviation(abbr, config, get_settings("config"))
+    return expand_abbreviation(abbr, config, global_config())
 
 
 def balance(code: str, pos: int, direction: str, xml: bool = False) -> list[Any]:

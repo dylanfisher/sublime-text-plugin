@@ -26,6 +26,11 @@ def handle_settings_change() -> None:
     emmet_cache = {}
 
 
+def global_config() -> dict[str, Any]:
+    "The user's `config` setting (Emmet snippets and options), always a dict"
+    return syntax.typed_setting("config", {}, dict)
+
+
 def get_user_css() -> str:
     "Returns user-defined CSS for popups"
     return str(get_settings("popup_css") or "")
@@ -58,13 +63,13 @@ def get_config(view: sublime.View, pos: int, params: dict[str, Any] | None = Non
     }
     if params:
         payload.update(params)
-    return Config(payload, get_settings("config"))
+    return Config(payload, global_config())
 
 
 def get_preview_config(config: Config) -> Config:
     user_config = dict(config.user_config or {})
     user_config["max_repeat"] = 200
-    preview_config = Config(user_config, get_settings("config"))
+    preview_config = Config(user_config, global_config())
     preview_config.options.update(config.options)
     preview_config.options["output.field"] = field_preview
     preview_config.context = config.context

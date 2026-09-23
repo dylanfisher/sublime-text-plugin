@@ -74,7 +74,8 @@ def get_dpi(file_path: str) -> float:
     name = os.path.splitext(file_path)[0]
 
     # If file name contains DPI suffix like `@2x`, use it to scale down image size
-    m = re.search(r"@(\d+(?:\.\d+))x$", name)
+    # Upstream required a fraction (`@1.5x`), so `@2x` was ignored.
+    m = re.search(r"@(\d+(?:\.\d+)?)x$", name)
     return (m and float(m.group(1))) or 1
 
 
@@ -90,7 +91,12 @@ def read_image_size(view: sublime.View, src: str) -> tuple[int, int] | None:
         file_name = os.path.basename(abs_file)
         ext = os.path.splitext(file_name)[1]
         chunk = 2048 if ext.lower() in (".svg", ".jpg", ".jpeg") else 100
-        data = utils.read_file(abs_file, chunk)
+        try:
+            data = utils.read_file(abs_file, chunk)
+        except (OSError, ValueError) as err:  # URLError/HTTPError/timeouts are OSErrors
+            print(f'Emmet: unable to read "{src}": {err}')
+            sublime.status_message(f"Emmet: unable to read {src}")
+            return None
         size = get_size(data)
         if size:
             dpi = get_dpi(src)
@@ -179,6 +185,15 @@ def get_size(data: bytes) -> tuple[int, int] | None:
     Returns size of given image fragment, if possible.
     Based on image_size script by Paulo Scardine: https://github.com/scardine/image_size
     """
+    try:
+        return _get_size(data)
+    # A truncated or malformed header (e.g. a JPEG whose size marker is past the
+    # bytes read) is "unknown size", not a crash.
+    except struct.error, ValueError, TypeError, IndexError:
+        return None
+
+
+def _get_size(data: bytes) -> tuple[int, int] | None:
     size = len(data)
     if size >= 10 and data[:6] in (b"GIF87a", b"GIF89a"):
         # GIFs

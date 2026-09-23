@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [custom]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: ruff check
+        run: uvx ruff@0.16.8 check .
+      - name: ruff format
+        run: uvx ruff@0.16.8 format --check .
+      - name: pyright
+        run: uvx --with sublime-text-stubs==1.4200.0b2 pyright@1.1.414
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: SublimeText/UnitTesting/actions/setup@v1
+        with:
+          package-name: Emmet
+          sublime-text-version: 4
+      # plugin_loaded() asks for telemetry consent in a modal dialog when these two
+      # settings are unset, which would block a headless test run.
+      - name: Pre-answer the telemetry prompt
+        run: |
+          mkdir -p "$SUBLIME_TEXT_PACKAGES/User"
+          echo '{"telemetry": false, "uid": "ci"}' > "$SUBLIME_TEXT_PACKAGES/User/Emmet.sublime-settings"
+      - uses: SublimeText/UnitTesting/actions/run-tests@v1
+        with:
+          package-name: Emmet
+          # coverage: false on purpose. coverage.py crashes in ST 4213's
+          # embedded Python 3.14 (empty sysconfig vars), which hangs the run.
+          coverage: false

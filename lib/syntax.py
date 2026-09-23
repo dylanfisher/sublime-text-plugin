@@ -30,6 +30,32 @@ def get_settings(key: str, default: Any = None) -> Any:
     return settings.get(key, default)
 
 
+_type_warned: set[str] = set()
+
+
+def typed_setting(key: str, default: Any, *types: type) -> Any:
+    """
+    Value of setting `key` if it is one of `types`, else `default`. A wrong type
+    (e.g. a string where a number is expected) is reported once in the console
+    instead of raising inside a listener on every keystroke. `bool` does not count
+    as a number here.
+    """
+    value = get_settings(key, default)
+    if isinstance(value, types) and not (isinstance(value, bool) and bool not in types):
+        return value
+    if value is not None and key not in _type_warned:
+        _type_warned.add(key)
+        expected = " or ".join(t.__name__ for t in types)
+        print(f'Emmet: ignoring setting "{key}": expected {expected}, got {value!r}')
+    return default
+
+
+def selector_list(key: str) -> list[str]:
+    "Setting `key` as a list of scope selectors (non-string items are dropped)"
+    value = typed_setting(key, [], list)
+    return [sel for sel in value if isinstance(sel, str)]
+
+
 def info(view: sublime.View, pt: int, fallback: str | None = None) -> SyntaxInfo | None:
     """
     Returns Emmet syntax info for given location in view.
@@ -57,11 +83,10 @@ def doc_syntax(view: sublime.View) -> str:
 
 def from_pos(view: sublime.View, pt: int) -> str | None:
     "Returns Emmet syntax for given location in view"
-    scopes = get_settings("syntax_scopes", {})
-    if scopes and isinstance(scopes, dict):
-        for name, sel in scopes.items():
-            if view.match_selector(pt, sel):
-                return name
+    scopes = typed_setting("syntax_scopes", {}, dict)
+    for name, sel in scopes.items():
+        if isinstance(sel, str) and view.match_selector(pt, sel):
+            return name
 
     return None
 
@@ -101,8 +126,7 @@ def is_jsx(syntax: str | None) -> bool:
 
 def is_inline(view: sublime.View, pt: int) -> bool:
     "Check if abbreviation in given location must be expanded as single line"
-    scopes = get_settings("inline_scopes", [])
-    return matches_selector(view, pt, scopes)
+    return matches_selector(view, pt, selector_list("inline_scopes"))
 
 
 def in_activation_scope(view: sublime.View, pt: int) -> bool:
@@ -110,12 +134,10 @@ def in_activation_scope(view: sublime.View, pt: int) -> bool:
     Check if given location in view can be used for abbreviation marker activation.
     Note that this method implies that caret is in Emmet-supported syntax
     """
-    ignore = get_settings("ignore_scopes", [])
-    if matches_selector(view, pt, ignore):
+    if matches_selector(view, pt, selector_list("ignore_scopes")):
         return False
 
-    scopes = get_settings("abbreviation_scopes", [])
-    if matches_selector(view, pt, scopes):
+    if matches_selector(view, pt, selector_list("abbreviation_scopes")):
         return True
 
     # Handle edge case for HTML syntax:
@@ -128,6 +150,6 @@ def in_activation_scope(view: sublime.View, pt: int) -> bool:
     )
 
 
-def matches_selector(view: sublime.View, pt: int, selectors: Any) -> bool:
+def matches_selector(view: sublime.View, pt: int, selectors: list[str]) -> bool:
     "Check if given location in view one of the given selectors"
     return any(view.match_selector(pt, sel) for sel in selectors)

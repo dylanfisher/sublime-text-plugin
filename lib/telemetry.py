@@ -90,7 +90,9 @@ def _flush_queue() -> None:
     # print('payload: %s' % data)
 
     try:
-        with urllib.request.urlopen(req):  # noqa: S310 - fixed https:// HOST
+        # Runs on Sublime's shared async worker: without a timeout a stalled
+        # connection would hold up every plugin's *_async callbacks.
+        with urllib.request.urlopen(req, timeout=10):  # noqa: S310 - fixed https:// HOST
             pass
     except OSError as err:  # URLError, timeouts, TLS errors: telemetry is best effort
         print(f"Emmet: telemetry request failed: {err}")
